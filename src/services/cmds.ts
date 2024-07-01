@@ -7,23 +7,22 @@ export async function getClashLogs() {
   const newRegex = /(.+?)\s+(.+?)\s+(.+)/;
   const logs = await invoke<string[]>("get_clash_logs");
 
-  return logs
-    .map((log) => {
-      const result = log.match(regex);
-      if (result) {
-        const [_, _time, type, payload] = result;
-        const time = dayjs(_time).format("MM-DD HH:mm:ss");
-        return { time, type, payload };
-      }
+  return logs.reduce<ILogItem[]>((acc, log) => {
+    const result = log.match(regex);
+    if (result) {
+      const [_, _time, type, payload] = result;
+      const time = dayjs(_time).format("MM-DD HH:mm:ss");
+      acc.push({ time, type, payload });
+      return acc;
+    }
 
-      const result2 = log.match(newRegex);
-      if (result2) {
-        const [_, time, type, payload] = result2;
-        return { time, type, payload };
-      }
-      return null;
-    })
-    .filter(Boolean) as ILogItem[];
+    const result2 = log.match(newRegex);
+    if (result2) {
+      const [_, time, type, payload] = result2;
+      acc.push({ time, type, payload });
+    }
+    return acc;
+  }, []);
 }
 
 export async function getProfiles() {
@@ -127,16 +126,19 @@ export async function getSystemProxy() {
   }>("get_sys_proxy");
 }
 
+export async function getAutotemProxy() {
+  return invoke<{
+    enable: boolean;
+    url: string;
+  }>("get_auto_proxy");
+}
+
 export async function changeClashCore(clashCore: string) {
   return invoke<any>("change_clash_core", { clashCore });
 }
 
 export async function restartSidecar() {
   return invoke<void>("restart_sidecar");
-}
-
-export async function grantPermission(core: string) {
-  return invoke<void>("grant_permission", { core });
 }
 
 export async function getAppDir() {
@@ -223,7 +225,7 @@ export async function exitApp() {
 
 export async function copyIconFile(
   path: string,
-  name: "common.png" | "sysproxy.png" | "tun.png"
+  name: "common" | "sysproxy" | "tun"
 ) {
   return invoke<void>("copy_icon_file", { path, name });
 }

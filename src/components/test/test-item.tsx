@@ -104,7 +104,6 @@ export const TestItem = (props: Props) => {
       }}
     >
       <TestBox
-        onClick={onEditTest}
         onContextMenu={(event) => {
           const { clientX, clientY } = event;
           setPosition({ top: clientY, left: clientX });
@@ -176,7 +175,7 @@ export const TestItem = (props: Props) => {
                 ":hover": { bgcolor: alpha(palette.primary.main, 0.15) },
               })}
             >
-              Check
+              {t("Test")}
             </Widget>
           )}
 

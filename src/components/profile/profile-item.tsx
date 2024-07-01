@@ -2,7 +2,6 @@ import dayjs from "dayjs";
 import { mutate } from "swr";
 import { useEffect, useState } from "react";
 import { useLockFn } from "ahooks";
-import { useRecoilState } from "recoil";
 import { useTranslation } from "react-i18next";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -17,13 +16,14 @@ import {
   CircularProgress,
 } from "@mui/material";
 import { RefreshRounded, DragIndicator } from "@mui/icons-material";
-import { atomLoadingCache } from "@/services/states";
-import { updateProfile, deleteProfile, viewProfile } from "@/services/cmds";
+import { useLoadingCache, useSetLoadingCache } from "@/services/states";
+import { updateProfile, viewProfile } from "@/services/cmds";
 import { Notice } from "@/components/base";
-import { EditorViewer } from "./editor-viewer";
+import { RulesEditorViewer } from "@/components/profile/rules-editor-viewer";
+import { EditorViewer } from "@/components/profile/editor-viewer";
 import { ProfileBox } from "./profile-box";
 import parseTraffic from "@/utils/parse-traffic";
-import { ConfirmViewer } from "./confirm-viewer";
+import { ConfirmViewer } from "@/components/profile/confirm-viewer";
 import { open } from "@tauri-apps/api/shell";
 const round = keyframes`
   from { transform: rotate(0deg); }
@@ -37,21 +37,33 @@ interface Props {
   itemData: IProfileItem;
   onSelect: (force: boolean) => void;
   onEdit: () => void;
+  onChange?: (prev?: string, curr?: string) => void;
+  onDelete: () => void;
 }
 
 export const ProfileItem = (props: Props) => {
-  const { selected, activating, itemData, onSelect, onEdit } = props;
+  const {
+    selected,
+    activating,
+    itemData,
+    onSelect,
+    onEdit,
+    onChange,
+    onDelete,
+  } = props;
   const { attributes, listeners, setNodeRef, transform, transition } =
     useSortable({ id: props.id });
 
   const { t } = useTranslation();
   const [anchorEl, setAnchorEl] = useState<any>(null);
   const [position, setPosition] = useState({ left: 0, top: 0 });
-  const [loadingCache, setLoadingCache] = useRecoilState(atomLoadingCache);
+  const loadingCache = useLoadingCache();
+  const setLoadingCache = useSetLoadingCache();
 
-  const { uid, name = "Profile", extra, updated = 0 } = itemData;
+  const { uid, name = "Profile", extra, updated = 0, option } = itemData;
 
   // local file mode
+  // remote file mode
   // remote file mode
   const hasUrl = !!itemData.url;
   const hasExtra = !!extra; // only subscription url has extra info
@@ -94,6 +106,11 @@ export const ProfileItem = (props: Props) => {
   }, [hasUrl, updated]);
 
   const [fileOpen, setFileOpen] = useState(false);
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const [proxiesOpen, setProxiesOpen] = useState(false);
+  const [groupsOpen, setGroupsOpen] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [scriptOpen, setScriptOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const onOpenHome = () => {
@@ -109,6 +126,31 @@ export const ProfileItem = (props: Props) => {
   const onEditFile = () => {
     setAnchorEl(null);
     setFileOpen(true);
+  };
+
+  const onEditRules = () => {
+    setAnchorEl(null);
+    setRulesOpen(true);
+  };
+
+  const onEditProxies = () => {
+    setAnchorEl(null);
+    setProxiesOpen(true);
+  };
+
+  const onEditGroups = () => {
+    setAnchorEl(null);
+    setGroupsOpen(true);
+  };
+
+  const onEditMerge = () => {
+    setAnchorEl(null);
+    setMergeOpen(true);
+  };
+
+  const onEditScript = () => {
+    setAnchorEl(null);
+    setScriptOpen(true);
   };
 
   const onForceSelect = () => {
@@ -162,44 +204,86 @@ export const ProfileItem = (props: Props) => {
     }
   });
 
-  const onDelete = useLockFn(async () => {
-    setAnchorEl(null);
-    try {
-      await deleteProfile(itemData.uid);
-      mutate("getProfiles");
-    } catch (err: any) {
-      Notice.error(err?.message || err.toString());
-    }
-  });
-
   const urlModeMenu = (
-    hasHome ? [{ label: "Home", handler: onOpenHome }] : []
+    hasHome ? [{ label: "Home", handler: onOpenHome, disabled: false }] : []
   ).concat([
-    { label: "Select", handler: onForceSelect },
-    { label: "Edit Info", handler: onEditInfo },
-    { label: "Edit File", handler: onEditFile },
-    { label: "Open File", handler: onOpenFile },
-    { label: "Update", handler: () => onUpdate(0) },
-    { label: "Update(Proxy)", handler: () => onUpdate(2) },
+    { label: "Select", handler: onForceSelect, disabled: false },
+    { label: "Edit Info", handler: onEditInfo, disabled: false },
+    { label: "Edit File", handler: onEditFile, disabled: false },
+    {
+      label: "Edit Rules",
+      handler: onEditRules,
+      disabled: option?.rules === null,
+    },
+    {
+      label: "Edit Proxies",
+      handler: onEditProxies,
+      disabled: option?.proxies === null,
+    },
+    {
+      label: "Edit Groups",
+      handler: onEditGroups,
+      disabled: option?.groups === null,
+    },
+    {
+      label: "Edit Merge",
+      handler: onEditMerge,
+      disabled: option?.merge === null,
+    },
+    {
+      label: "Edit Script",
+      handler: onEditScript,
+      disabled: option?.script === null,
+    },
+    { label: "Open File", handler: onOpenFile, disabled: false },
+    { label: "Update", handler: () => onUpdate(0), disabled: false },
+    { label: "Update(Proxy)", handler: () => onUpdate(2), disabled: false },
     {
       label: "Delete",
       handler: () => {
         setAnchorEl(null);
         setConfirmOpen(true);
       },
+      disabled: false,
     },
   ]);
   const fileModeMenu = [
-    { label: "Select", handler: onForceSelect },
-    { label: "Edit Info", handler: onEditInfo },
-    { label: "Edit File", handler: onEditFile },
-    { label: "Open File", handler: onOpenFile },
+    { label: "Select", handler: onForceSelect, disabled: false },
+    { label: "Edit Info", handler: onEditInfo, disabled: false },
+    { label: "Edit File", handler: onEditFile, disabled: false },
+    {
+      label: "Edit Rules",
+      handler: onEditRules,
+      disabled: option?.rules === null,
+    },
+    {
+      label: "Edit Proxies",
+      handler: onEditProxies,
+      disabled: option?.proxies === null,
+    },
+    {
+      label: "Edit Groups",
+      handler: onEditGroups,
+      disabled: option?.groups === null,
+    },
+    {
+      label: "Edit Merge",
+      handler: onEditMerge,
+      disabled: option?.merge === null,
+    },
+    {
+      label: "Edit Script",
+      handler: onEditScript,
+      disabled: option?.script === null,
+    },
+    { label: "Open File", handler: onOpenFile, disabled: false },
     {
       label: "Delete",
       handler: () => {
         setAnchorEl(null);
         setConfirmOpen(true);
       },
+      disabled: false,
     },
   ];
 
@@ -242,7 +326,7 @@ export const ProfileItem = (props: Props) => {
               backdropFilter: "blur(2px)",
             }}
           >
-            <CircularProgress size={20} />
+            <CircularProgress color="inherit" size={20} />
           </Box>
         )}
         <Box position="relative">
@@ -278,6 +362,7 @@ export const ProfileItem = (props: Props) => {
           {/* only if has url can it be updated */}
           {hasUrl && (
             <IconButton
+              title={t("Refresh")}
               sx={{
                 position: "absolute",
                 p: "3px",
@@ -311,7 +396,7 @@ export const ProfileItem = (props: Props) => {
                 </Typography>
               ) : (
                 hasUrl && (
-                  <Typography noWrap title={`From ${from}`}>
+                  <Typography noWrap title={`${t("From")} ${from}`}>
                     {from}
                   </Typography>
                 )
@@ -322,7 +407,7 @@ export const ProfileItem = (props: Props) => {
                   flex="1 0 auto"
                   fontSize={14}
                   textAlign="right"
-                  title={`Updated Time: ${parseExpire(updated)}`}
+                  title={`${t("Update Time")}: ${parseExpire(updated)}`}
                 >
                   {updated > 0 ? dayjs(updated * 1000).fromNow() : ""}
                 </Typography>
@@ -333,17 +418,21 @@ export const ProfileItem = (props: Props) => {
         {/* the third line show extra info or last updated time */}
         {hasExtra ? (
           <Box sx={{ ...boxStyle, fontSize: 14 }}>
-            <span title="Used / Total">
+            <span title={t("Used / Total")}>
               {parseTraffic(upload + download)} / {parseTraffic(total)}
             </span>
-            <span title="Expire Time">{expire}</span>
+            <span title={t("Expire Time")}>{expire}</span>
           </Box>
         ) : (
           <Box sx={{ ...boxStyle, fontSize: 12, justifyContent: "flex-end" }}>
-            <span title="Updated Time">{parseExpire(updated)}</span>
+            <span title={t("Update Time")}>{parseExpire(updated)}</span>
           </Box>
         )}
-        <LinearProgress variant="determinate" value={progress} />
+        <LinearProgress
+          variant="determinate"
+          value={progress}
+          style={{ opacity: progress > 0 ? 1 : 0 }}
+        />
       </ProfileBox>
 
       <Menu
@@ -363,6 +452,7 @@ export const ProfileItem = (props: Props) => {
           <MenuItem
             key={item.label}
             onClick={item.handler}
+            disabled={item.disabled}
             sx={[
               {
                 minWidth: 120,
@@ -384,14 +474,60 @@ export const ProfileItem = (props: Props) => {
       </Menu>
 
       <EditorViewer
-        uid={uid}
+        mode="profile"
+        property={uid}
         open={fileOpen}
-        mode="yaml"
+        language="yaml"
+        schema="clash"
+        onChange={onChange}
         onClose={() => setFileOpen(false)}
       />
+      <RulesEditorViewer
+        profileUid={uid}
+        property={option?.rules ?? ""}
+        open={rulesOpen}
+        onChange={onChange}
+        onClose={() => setRulesOpen(false)}
+      />
+      <EditorViewer
+        mode="profile"
+        property={option?.proxies ?? ""}
+        open={proxiesOpen}
+        language="yaml"
+        schema={undefined}
+        onChange={onChange}
+        onClose={() => setProxiesOpen(false)}
+      />
+      <EditorViewer
+        mode="profile"
+        property={option?.groups ?? ""}
+        open={groupsOpen}
+        language="yaml"
+        schema={undefined}
+        onChange={onChange}
+        onClose={() => setGroupsOpen(false)}
+      />
+      <EditorViewer
+        mode="profile"
+        property={option?.merge ?? ""}
+        open={mergeOpen}
+        language="yaml"
+        schema="merge"
+        onChange={onChange}
+        onClose={() => setMergeOpen(false)}
+      />
+      <EditorViewer
+        mode="profile"
+        property={option?.script ?? ""}
+        open={scriptOpen}
+        language="javascript"
+        schema={undefined}
+        onChange={onChange}
+        onClose={() => setScriptOpen(false)}
+      />
       <ConfirmViewer
-        title="Confirm deletion"
-        message="This operation is not reversible"
+        title={t("Confirm deletion")}
+        message={t("This operation is not reversible")}
         open={confirmOpen}
         onClose={() => setConfirmOpen(false)}
         onConfirm={() => {

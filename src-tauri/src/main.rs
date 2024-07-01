@@ -15,10 +15,20 @@ use tauri::{api, SystemTray};
 
 fn main() -> std::io::Result<()> {
     // 单例检测
-    if server::check_singleton().is_err() {
-        println!("app exists");
+    let app_exists: bool = tauri::async_runtime::block_on(async move {
+        if server::check_singleton().await.is_err() {
+            println!("app exists");
+            true
+        } else {
+            false
+        }
+    });
+    if app_exists {
         return Ok(());
     }
+
+    #[cfg(target_os = "linux")]
+    std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
 
     crate::log_err!(init::init_config());
 
@@ -26,13 +36,16 @@ fn main() -> std::io::Result<()> {
     let mut builder = tauri::Builder::default()
         .system_tray(SystemTray::new())
         .setup(|app| {
-            resolve::resolve_setup(app);
+            tauri::async_runtime::block_on(async move {
+                resolve::resolve_setup(app).await;
+            });
             Ok(())
         })
         .on_system_tray_event(core::tray::Tray::on_system_tray_event)
         .invoke_handler(tauri::generate_handler![
             // common
             cmds::get_sys_proxy,
+            cmds::get_auto_proxy,
             cmds::open_app_dir,
             cmds::open_logs_dir,
             cmds::open_web_url,
@@ -40,7 +53,6 @@ fn main() -> std::io::Result<()> {
             cmds::get_portable_flag,
             // cmds::kill_sidecar,
             cmds::restart_sidecar,
-            cmds::grant_permission,
             // clash
             cmds::get_clash_info,
             cmds::get_clash_logs,

@@ -1,12 +1,13 @@
-use super::service;
-use super::{clash_api, logger::Logger};
+use crate::config::*;
+use crate::core::{clash_api, handle, logger::Logger, service};
 use crate::log_err;
-use crate::{config::*, utils::dirs};
-use anyhow::{bail, Context, Result};
+use crate::utils::dirs;
+use anyhow::{bail, Result};
 use once_cell::sync::OnceCell;
 use parking_lot::Mutex;
-use std::{fs, io::Write, sync::Arc, time::Duration};
-use sysinfo::{Pid, System};
+use serde_yaml::Mapping;
+use std::{sync::Arc, time::Duration};
+use sysinfo::System;
 use tauri::api::process::{Command, CommandChild, CommandEvent};
 use tokio::time::sleep;
 
@@ -29,21 +30,6 @@ impl CoreManager {
     }
 
     pub fn init(&self) -> Result<()> {
-        // kill old clash process
-        let _ = dirs::clash_pid_path()
-            .and_then(|path| fs::read(path).map(|p| p.to_vec()).context(""))
-            .and_then(|pid| String::from_utf8_lossy(&pid).parse().context(""))
-            .map(|pid| {
-                let mut system = System::new();
-                system.refresh_all();
-                if let Some(proc) = system.process(Pid::from_u32(pid)) {
-                    if proc.name().contains("clash") {
-                        log::debug!(target: "app", "kill old clash process");
-                        proc.kill();
-                    }
-                }
-            });
-
         tauri::async_runtime::spawn(async {
             // 启动clash
             log_err!(Self::global().run_core().await);
@@ -86,13 +72,25 @@ impl CoreManager {
 
         #[allow(unused_mut)]
         let mut should_kill = match self.sidecar.lock().take() {
-            Some(child) => {
-                log::debug!(target: "app", "stop the core by sidecar");
-                let _ = child.kill();
-                true
-            }
+            Some(_) => true,
             None => false,
         };
+
+        // 关闭tun模式
+        let mut disable = Mapping::new();
+        let mut tun = Mapping::new();
+        tun.insert("enable".into(), false.into());
+        disable.insert("tun".into(), tun.into());
+        log::debug!(target: "app", "disable tun mode");
+        let _ = clash_api::patch_configs(&disable).await;
+
+        let mut system = System::new();
+        system.refresh_all();
+        let procs = system.processes_by_name("verge-mihomo");
+        for proc in procs {
+            log::debug!(target: "app", "kill all clash process");
+            proc.kill();
+        }
 
         if *self.use_service_mode.lock() {
             log::debug!(target: "app", "stop the core by service");
@@ -115,12 +113,12 @@ impl CoreManager {
             // 服务模式启动失败就直接运行sidecar
             log::debug!(target: "app", "try to run core in service mode");
 
-            match (|| async {
+            let res = async {
                 service::check_service().await?;
                 service::run_core_by_service(&config_path).await
-            })()
-            .await
-            {
+            }
+            .await;
+            match res {
                 Ok(_) => return Ok(()),
                 Err(err) => {
                     // 修改这个值，免得stop出错
@@ -134,30 +132,28 @@ impl CoreManager {
         let app_dir = dirs::path_to_str(&app_dir)?;
 
         let clash_core = { Config::verge().latest().clash_core.clone() };
-        let clash_core = clash_core.unwrap_or("clash".into());
-        let is_clash = clash_core == "clash";
+        let mut clash_core = clash_core.unwrap_or("verge-mihomo".into());
+
+        // compatibility
+        if clash_core.contains("clash") {
+            clash_core = "verge-mihomo".to_string();
+            Config::verge().draft().patch_config(IVerge {
+                clash_core: Some("verge-mihomo".to_string()),
+                ..IVerge::default()
+            });
+            Config::verge().apply();
+            match Config::verge().data().save_file() {
+                Ok(_) => handle::Handle::refresh_verge(),
+                Err(err) => log::error!(target: "app", "{err}"),
+            }
+        }
 
         let config_path = dirs::path_to_str(&config_path)?;
 
-        let args = match clash_core.as_str() {
-            "clash-meta" => vec!["-d", app_dir, "-f", config_path],
-            "clash-meta-alpha" => vec!["-d", app_dir, "-f", config_path],
-            _ => vec!["-d", app_dir, "-f", config_path],
-        };
+        let args = vec!["-d", app_dir, "-f", config_path];
 
         let cmd = Command::new_sidecar(clash_core)?;
         let (mut rx, cmd_child) = cmd.args(args).spawn()?;
-
-        // 将pid写入文件中
-        crate::log_err!((|| {
-            let pid = cmd_child.pid();
-            let path = dirs::clash_pid_path()?;
-            fs::File::create(path)
-                .context("failed to create the pid file")?
-                .write(format!("{pid}").as_bytes())
-                .context("failed to write pid to the file")?;
-            <Result<()>>::Ok(())
-        })());
 
         let mut sidecar = self.sidecar.lock();
         *sidecar = Some(cmd_child);
@@ -167,25 +163,19 @@ impl CoreManager {
             while let Some(event) = rx.recv().await {
                 match event {
                     CommandEvent::Stdout(line) => {
-                        if is_clash {
-                            let stdout = clash_api::parse_log(line.clone());
-                            log::info!(target: "app", "[clash]: {stdout}");
-                        } else {
-                            log::info!(target: "app", "[clash]: {line}");
-                        };
+                        log::info!(target: "app", "[mihomo]: {line}");
                         Logger::global().set_log(line);
                     }
                     CommandEvent::Stderr(err) => {
-                        // let stdout = clash_api::parse_log(err.clone());
-                        log::error!(target: "app", "[clash]: {err}");
+                        log::error!(target: "app", "[mihomo]: {err}");
                         Logger::global().set_log(err);
                     }
                     CommandEvent::Error(err) => {
-                        log::error!(target: "app", "[clash]: {err}");
+                        log::error!(target: "app", "[mihomo]: {err}");
                         Logger::global().set_log(err);
                     }
                     CommandEvent::Terminated(_) => {
-                        log::info!(target: "app", "clash core terminated");
+                        log::info!(target: "app", "mihomo core terminated");
                         let _ = CoreManager::global().recover_core();
                         break;
                     }
@@ -205,9 +195,7 @@ impl CoreManager {
         }
 
         // 清空原来的sidecar值
-        if let Some(sidecar) = self.sidecar.lock().take() {
-            let _ = sidecar.kill();
-        }
+        let _ = self.sidecar.lock().take();
 
         tauri::async_runtime::spawn(async move {
             // 6秒之后再查看服务是否正常 (时间随便搞的)
@@ -231,19 +219,30 @@ impl CoreManager {
     }
 
     /// 停止核心运行
-    pub fn stop_core(&self) -> Result<()> {
+    pub async fn stop_core(&self) -> Result<()> {
+        // 关闭tun模式
+        let mut disable = Mapping::new();
+        let mut tun = Mapping::new();
+        tun.insert("enable".into(), false.into());
+        disable.insert("tun".into(), tun.into());
+        log::debug!(target: "app", "disable tun mode");
+        let _ = clash_api::patch_configs(&disable).await;
+
         if *self.use_service_mode.lock() {
             log::debug!(target: "app", "stop the core by service");
-            tauri::async_runtime::block_on(async move {
-                log_err!(service::stop_core_by_service().await);
-            });
+            log_err!(service::stop_core_by_service().await);
             return Ok(());
         }
 
         let mut sidecar = self.sidecar.lock();
-        if let Some(child) = sidecar.take() {
-            log::debug!(target: "app", "stop the core by sidecar");
-            let _ = child.kill();
+        let _ = sidecar.take();
+
+        let mut system = System::new();
+        system.refresh_all();
+        let procs = system.processes_by_name("verge-mihomo");
+        for proc in procs {
+            log::debug!(target: "app", "kill all clash process");
+            proc.kill();
         }
         Ok(())
     }
@@ -251,7 +250,7 @@ impl CoreManager {
     /// 切换核心
     pub async fn change_core(&self, clash_core: Option<String>) -> Result<()> {
         let clash_core = clash_core.ok_or(anyhow::anyhow!("clash core is null"))?;
-        const CLASH_CORES: [&str; 2] = ["clash-meta", "clash-meta-alpha"];
+        const CLASH_CORES: [&str; 2] = ["verge-mihomo", "verge-mihomo-alpha"];
 
         if !CLASH_CORES.contains(&clash_core.as_str()) {
             bail!("invalid clash core name \"{clash_core}\"");
@@ -262,7 +261,7 @@ impl CoreManager {
         Config::verge().draft().clash_core = Some(clash_core);
 
         // 更新订阅
-        Config::generate()?;
+        Config::generate().await?;
 
         self.check_config()?;
 
@@ -290,7 +289,7 @@ impl CoreManager {
         log::debug!(target: "app", "try to update clash config");
 
         // 更新订阅
-        Config::generate()?;
+        Config::generate().await?;
 
         // 检查订阅是否正常
         self.check_config()?;

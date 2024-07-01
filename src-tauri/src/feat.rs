@@ -106,7 +106,7 @@ pub fn toggle_tun_mode() {
 pub async fn patch_clash(patch: Mapping) -> Result<()> {
     Config::clash().draft().patch_config(patch.clone());
 
-    match {
+    let res = {
         let redir_port = patch.get("redir-port");
         let tproxy_port = patch.get("tproxy-port");
         let mixed_port = patch.get("mixed-port");
@@ -139,7 +139,7 @@ pub async fn patch_clash(patch: Mapping) -> Result<()> {
             || patch.get("secret").is_some()
             || patch.get("external-controller").is_some()
         {
-            Config::generate()?;
+            Config::generate().await?;
             CoreManager::global().run_core().await?;
             handle::Handle::refresh_clash();
         }
@@ -156,7 +156,8 @@ pub async fn patch_clash(patch: Mapping) -> Result<()> {
         Config::runtime().latest().patch_config(patch);
 
         <Result<()>>::Ok(())
-    } {
+    };
+    match res {
         Ok(()) => {
             Config::clash().apply();
             Config::clash().data().save_config()?;
@@ -177,29 +178,56 @@ pub async fn patch_verge(patch: IVerge) -> Result<()> {
     let tun_mode = patch.enable_tun_mode;
     let auto_launch = patch.enable_auto_launch;
     let system_proxy = patch.enable_system_proxy;
+    let pac = patch.proxy_auto_config;
+    let pac_content = patch.pac_file_content;
     let proxy_bypass = patch.system_proxy_bypass;
     let language = patch.language;
     let port = patch.verge_mixed_port;
+    #[cfg(target_os = "macos")]
+    let tray_icon = patch.tray_icon;
     let common_tray_icon = patch.common_tray_icon;
     let sysproxy_tray_icon = patch.sysproxy_tray_icon;
     let tun_tray_icon = patch.tun_tray_icon;
-
-    match {
+    #[cfg(not(target_os = "windows"))]
+    let redir_enabled = patch.verge_redir_enabled;
+    #[cfg(target_os = "linux")]
+    let tproxy_enabled = patch.verge_tproxy_enabled;
+    let socks_enabled = patch.verge_socks_enabled;
+    let http_enabled = patch.verge_http_enabled;
+    let res = {
         let service_mode = patch.enable_service_mode;
 
         if service_mode.is_some() {
             log::debug!(target: "app", "change service mode to {}", service_mode.unwrap());
 
-            Config::generate()?;
+            Config::generate().await?;
             CoreManager::global().run_core().await?;
         } else if tun_mode.is_some() {
             update_core_config().await?;
         }
-
+        #[cfg(not(target_os = "windows"))]
+        if redir_enabled.is_some() {
+            Config::generate().await?;
+            CoreManager::global().run_core().await?;
+        }
+        #[cfg(target_os = "linux")]
+        if tproxy_enabled.is_some() {
+            Config::generate().await?;
+            CoreManager::global().run_core().await?;
+        }
+        if socks_enabled.is_some() || http_enabled.is_some() {
+            Config::generate().await?;
+            CoreManager::global().run_core().await?;
+        }
         if auto_launch.is_some() {
             sysopt::Sysopt::global().update_launch()?;
         }
-        if system_proxy.is_some() || proxy_bypass.is_some() || port.is_some() {
+        if system_proxy.is_some()
+            || proxy_bypass.is_some()
+            || port.is_some()
+            || pac.is_some()
+            || pac_content.is_some()
+        {
             sysopt::Sysopt::global().update_sysproxy()?;
             sysopt::Sysopt::global().guard_proxy();
         }
@@ -222,9 +250,14 @@ pub async fn patch_verge(patch: IVerge) -> Result<()> {
         {
             handle::Handle::update_systray_part()?;
         }
+        #[cfg(target_os = "macos")]
+        if tray_icon.is_some() {
+            handle::Handle::update_systray_part()?;
+        }
 
         <Result<()>>::Ok(())
-    } {
+    };
+    match res {
         Ok(()) => {
             Config::verge().apply();
             Config::verge().data().save_file()?;
@@ -259,7 +292,6 @@ pub async fn update_profile(uid: String, option: Option<PrfOption>) -> Result<()
         Some((url, opt)) => {
             let merged_opt = PrfOption::merge(opt, option);
             let item = PrfItem::from_url(&url, None, None, merged_opt).await?;
-
             let profiles = Config::profiles();
             let mut profiles = profiles.latest();
             profiles.update_item(uid.clone(), item)?;
@@ -299,7 +331,7 @@ pub fn copy_clash_env(app_handle: &AppHandle) {
 
     let sh =
         format!("export https_proxy={http_proxy} http_proxy={http_proxy} all_proxy={socks5_proxy}");
-    let cmd: String = format!("set http_proxy={http_proxy} \n set https_proxy={http_proxy}");
+    let cmd: String = format!("set http_proxy={http_proxy}\r\nset https_proxy={http_proxy}");
     let ps: String = format!("$env:HTTP_PROXY=\"{http_proxy}\"; $env:HTTPS_PROXY=\"{http_proxy}\"");
 
     let mut cliboard = app_handle.clipboard_manager();
@@ -354,11 +386,19 @@ pub async fn test_delay(url: String) -> Result<u32> {
         .get(url).header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0");
     let start = Instant::now();
 
-    let response = request.send().await?;
-    if response.status().is_success() {
-        let delay = start.elapsed().as_millis() as u32;
-        Ok(delay)
-    } else {
-        Ok(10000u32)
+    let response = request.send().await;
+    match response {
+        Ok(response) => {
+            log::trace!(target: "app", "test_delay response: {:#?}", response);
+            if response.status().is_success() {
+                Ok(start.elapsed().as_millis() as u32)
+            } else {
+                Ok(10000u32)
+            }
+        }
+        Err(err) => {
+            log::trace!(target: "app", "test_delay error: {:#?}", err);
+            Err(err.into())
+        }
     }
 }

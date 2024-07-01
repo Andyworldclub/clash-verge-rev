@@ -1,7 +1,8 @@
 {
+  "$schema": "../node_modules/@tauri-apps/cli/schema.json",
   "package": {
     "productName": "Clash Verge",
-    "version": "1.5.11"
+    "version": "1.6.6"
   },
   "build": {
     "distDir": "../dist",
@@ -17,12 +18,13 @@
         "icons/32x32.png",
         "icons/128x128.png",
         "icons/128x128@2x.png",
-        "icons/icon-new.icns",
+        "icons/icon.icns",
         "icons/icon.ico"
       ],
       "resources": ["resources"],
-      "externalBin": ["sidecar/clash-meta", "sidecar/clash-meta-alpha"],
-      "copyright": "© 2022 zzzgydi All Rights Reserved",
+      "publisher": "Clash Verge Rev",
+      "externalBin": ["sidecar/verge-mihomo", "sidecar/verge-mihomo-alpha"],
+      "copyright": "GNU General Public License v3.0",
       "category": "DeveloperTool",
       "shortDescription": "A Clash Meta GUI based on tauri.",
       "longDescription": "A Clash Meta GUI based on tauri."
@@ -61,15 +63,20 @@
       },
       "protocol": {
         "asset": true,
-        "assetScope": ["$APPDATA/**", "$RESOURCE/../**"]
+        "assetScope": ["$APPDATA/**", "$RESOURCE/../**", "**"]
       },
       "path": {
         "all": true
+      },
+      "fs": {
+        "exists": true,
+        "readFile": true,
+        "scope": ["$APPDATA/**", "$RESOURCE/../**", "**"]
       }
     },
     "windows": [],
     "security": {
-      "csp": "script-src 'unsafe-eval' 'self'; default-src blob: data: filesystem: ws: wss: http: https: tauri: 'unsafe-eval' 'unsafe-inline' 'self'; img-src asset: http: https: data: 'self';"
+      "csp": "default-src blob: data: filesystem: ws: wss: http: https: tauri: asset: 'unsafe-eval' 'unsafe-inline' 'self';"
     }
   }
 }

@@ -1,4 +1,5 @@
-use crate::config::Config;
+use crate::config::{Config, IVerge};
+use crate::core::handle;
 use crate::utils::dirs;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -102,7 +103,7 @@ pub async fn install_service() -> Result<()> {
     if !installer_path.exists() {
         bail!("installer not found");
     }
-    let shell = installer_path.to_string_lossy();
+    let shell = installer_path.to_string_lossy().replace(" ", "\\\\ ");
     let command = format!(r#"do shell script "{shell}" with administrator privileges"#);
 
     let status = StdCommand::new("osascript")
@@ -237,7 +238,21 @@ pub(super) async fn run_core_by_service(config_file: &PathBuf) -> Result<()> {
     }
 
     let clash_core = { Config::verge().latest().clash_core.clone() };
-    let clash_core = clash_core.unwrap_or("clash".into());
+    let mut clash_core = clash_core.unwrap_or("verge-mihomo".into());
+
+    // compatibility
+    if clash_core.contains("clash") {
+        clash_core = "verge-mihomo".to_string();
+        Config::verge().draft().patch_config(IVerge {
+            clash_core: Some("verge-mihomo".to_string()),
+            ..IVerge::default()
+        });
+        Config::verge().apply();
+        match Config::verge().data().save_file() {
+            Ok(_) => handle::Handle::refresh_verge(),
+            Err(err) => log::error!(target: "app", "{err}"),
+        }
+    }
 
     let bin_ext = if cfg!(windows) { ".exe" } else { "" };
     let clash_bin = format!("{clash_core}{bin_ext}");
@@ -281,6 +296,46 @@ pub(super) async fn run_core_by_service(config_file: &PathBuf) -> Result<()> {
 /// stop the clash by service
 pub(super) async fn stop_core_by_service() -> Result<()> {
     let url = format!("{SERVICE_URL}/stop_clash");
+    let res = reqwest::ClientBuilder::new()
+        .no_proxy()
+        .build()?
+        .post(url)
+        .send()
+        .await?
+        .json::<JsonResponse>()
+        .await
+        .context("failed to connect to the Clash Verge Service")?;
+
+    if res.code != 0 {
+        bail!(res.msg);
+    }
+
+    Ok(())
+}
+
+/// set dns by service
+pub async fn set_dns_by_service() -> Result<()> {
+    let url = format!("{SERVICE_URL}/set_dns");
+    let res = reqwest::ClientBuilder::new()
+        .no_proxy()
+        .build()?
+        .post(url)
+        .send()
+        .await?
+        .json::<JsonResponse>()
+        .await
+        .context("failed to connect to the Clash Verge Service")?;
+
+    if res.code != 0 {
+        bail!(res.msg);
+    }
+
+    Ok(())
+}
+
+/// unset dns by service
+pub async fn unset_dns_by_service() -> Result<()> {
+    let url = format!("{SERVICE_URL}/unset_dns");
     let res = reqwest::ClientBuilder::new()
         .no_proxy()
         .build()?

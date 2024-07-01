@@ -1,8 +1,7 @@
 import useSWR from "swr";
 import { useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { IconButton, Tooltip } from "@mui/material";
-import { PrivacyTipRounded, Settings, InfoRounded } from "@mui/icons-material";
+import { PrivacyTipRounded, Settings } from "@mui/icons-material";
 import { checkService } from "@/services/cmds";
 import { useVerge } from "@/hooks/use-verge";
 import { DialogRef, Switch } from "@/components/base";
@@ -11,7 +10,7 @@ import { GuardState } from "./mods/guard-state";
 import { ServiceViewer } from "./mods/service-viewer";
 import { SysproxyViewer } from "./mods/sysproxy-viewer";
 import { TunViewer } from "./mods/tun-viewer";
-import getSystem from "@/utils/get-system";
+import { TooltipIcon } from "@/components/base/base-tooltip-icon";
 
 interface Props {
   onError?: (err: Error) => void;
@@ -55,26 +54,11 @@ const SettingSystem = ({ onError }: Props) => {
       <SettingItem
         label={t("Tun Mode")}
         extra={
-          <>
-            <Tooltip title={t("Tun Mode Info")} placement="top">
-              <IconButton color="inherit" size="small">
-                <InfoRounded
-                  fontSize="inherit"
-                  style={{ cursor: "pointer", opacity: 0.75 }}
-                />
-              </IconButton>
-            </Tooltip>
-            <IconButton
-              color="inherit"
-              size="small"
-              onClick={() => tunRef.current?.open()}
-            >
-              <Settings
-                fontSize="inherit"
-                style={{ cursor: "pointer", opacity: 0.75 }}
-              />
-            </IconButton>
-          </>
+          <TooltipIcon
+            title={t("Tun Mode Info")}
+            icon={Settings}
+            onClick={() => tunRef.current?.open()}
+          />
         }
       >
         <GuardState
@@ -92,16 +76,11 @@ const SettingSystem = ({ onError }: Props) => {
       <SettingItem
         label={t("Service Mode")}
         extra={
-          <IconButton
-            color="inherit"
-            size="small"
+          <TooltipIcon
+            title={t("Service Mode Info")}
+            icon={PrivacyTipRounded}
             onClick={() => serviceRef.current?.open()}
-          >
-            <PrivacyTipRounded
-              fontSize="inherit"
-              style={{ cursor: "pointer", opacity: 0.75 }}
-            />
-          </IconButton>
+          />
         }
       >
         <GuardState
@@ -124,16 +103,13 @@ const SettingSystem = ({ onError }: Props) => {
       <SettingItem
         label={t("System Proxy")}
         extra={
-          <IconButton
-            color="inherit"
-            size="small"
-            onClick={() => sysproxyRef.current?.open()}
-          >
-            <Settings
-              fontSize="inherit"
-              style={{ cursor: "pointer", opacity: 0.75 }}
+          <>
+            <TooltipIcon
+              title={t("System Proxy Info")}
+              icon={Settings}
+              onClick={() => sysproxyRef.current?.open()}
             />
-          </IconButton>
+          </>
         }
       >
         <GuardState
@@ -161,7 +137,10 @@ const SettingSystem = ({ onError }: Props) => {
         </GuardState>
       </SettingItem>
 
-      <SettingItem label={t("Silent Start")}>
+      <SettingItem
+        label={t("Silent Start")}
+        extra={<TooltipIcon title={t("Silent Start Info")} />}
+      >
         <GuardState
           value={enable_silent_start ?? false}
           valueProps="checked"

@@ -13,6 +13,7 @@ import {
 import { useClash } from "@/hooks/use-clash";
 import { BaseDialog, DialogRef, Notice, Switch } from "@/components/base";
 import { StackModeSwitch } from "./stack-mode-switch";
+import { enhanceProfiles } from "@/services/cmds";
 
 export const TunViewer = forwardRef<DialogRef>((props, ref) => {
   const { t } = useTranslation();
@@ -22,12 +23,12 @@ export const TunViewer = forwardRef<DialogRef>((props, ref) => {
   const [open, setOpen] = useState(false);
   const [values, setValues] = useState({
     stack: "gvisor",
-    device: "Meta",
+    device: "Mihomo",
     autoRoute: true,
     autoDetectInterface: true,
     dnsHijack: ["any:53"],
     strictRoute: false,
-    mtu: 9000,
+    mtu: 1500,
   });
 
   useImperativeHandle(ref, () => ({
@@ -35,12 +36,12 @@ export const TunViewer = forwardRef<DialogRef>((props, ref) => {
       setOpen(true);
       setValues({
         stack: clash?.tun.stack ?? "gvisor",
-        device: clash?.tun.device ?? "Meta",
+        device: clash?.tun.device ?? "Mihomo",
         autoRoute: clash?.tun["auto-route"] ?? true,
         autoDetectInterface: clash?.tun["auto-detect-interface"] ?? true,
         dnsHijack: clash?.tun["dns-hijack"] ?? ["any:53"],
         strictRoute: clash?.tun["strict-route"] ?? false,
-        mtu: clash?.tun.mtu ?? 9000,
+        mtu: clash?.tun.mtu ?? 1500,
       });
     },
     close: () => setOpen(false),
@@ -50,12 +51,12 @@ export const TunViewer = forwardRef<DialogRef>((props, ref) => {
     try {
       let tun = {
         stack: values.stack,
-        device: values.device,
+        device: values.device === "" ? "Mihomo" : values.device,
         "auto-route": values.autoRoute,
         "auto-detect-interface": values.autoDetectInterface,
-        "dns-hijack": values.dnsHijack,
+        "dns-hijack": values.dnsHijack[0] === "" ? [] : values.dnsHijack,
         "strict-route": values.strictRoute,
-        mtu: values.mtu,
+        mtu: values.mtu ?? 1500,
       };
       await patchClash({ tun });
       await mutateClash(
@@ -65,6 +66,12 @@ export const TunViewer = forwardRef<DialogRef>((props, ref) => {
         }),
         false
       );
+      try {
+        await enhanceProfiles();
+        Notice.success(t("Settings Applied"), 1000);
+      } catch (err: any) {
+        Notice.error(err.message || err.toString(), 3000);
+      }
       setOpen(false);
     } catch (err: any) {
       Notice.error(err.message || err.toString());
@@ -83,21 +90,21 @@ export const TunViewer = forwardRef<DialogRef>((props, ref) => {
             onClick={async () => {
               let tun = {
                 stack: "gvisor",
-                device: "Meta",
+                device: "Mihomo",
                 "auto-route": true,
                 "auto-detect-interface": true,
                 "dns-hijack": ["any:53"],
                 "strict-route": false,
-                mtu: 9000,
+                mtu: 1500,
               };
               setValues({
                 stack: "gvisor",
-                device: "Meta",
+                device: "Mihomo",
                 autoRoute: true,
                 autoDetectInterface: true,
                 dnsHijack: ["any:53"],
                 strictRoute: false,
-                mtu: 9000,
+                mtu: 1500,
               });
               await patchClash({ tun });
               await mutateClash(
@@ -144,7 +151,7 @@ export const TunViewer = forwardRef<DialogRef>((props, ref) => {
             spellCheck="false"
             sx={{ width: 250 }}
             value={values.device}
-            placeholder="Meta"
+            placeholder="Mihomo"
             onChange={(e) =>
               setValues((v) => ({ ...v, device: e.target.value }))
             }
@@ -208,7 +215,7 @@ export const TunViewer = forwardRef<DialogRef>((props, ref) => {
             spellCheck="false"
             sx={{ width: 250 }}
             value={values.mtu}
-            placeholder="9000"
+            placeholder="1500"
             onChange={(e) =>
               setValues((v) => ({
                 ...v,

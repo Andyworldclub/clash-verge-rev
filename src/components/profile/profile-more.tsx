@@ -1,4 +1,3 @@
-import dayjs from "dayjs";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLockFn } from "ahooks";
@@ -14,51 +13,25 @@ import {
 import { FeaturedPlayListRounded } from "@mui/icons-material";
 import { viewProfile } from "@/services/cmds";
 import { Notice } from "@/components/base";
-import { EditorViewer } from "./editor-viewer";
+import { EditorViewer } from "@/components/profile/editor-viewer";
 import { ProfileBox } from "./profile-box";
 import { LogViewer } from "./log-viewer";
-import { ConfirmViewer } from "./confirm-viewer";
 
 interface Props {
-  selected: boolean;
-  itemData: IProfileItem;
-  enableNum: number;
   logInfo?: [string, string][];
-  onEnable: () => void;
-  onDisable: () => void;
-  onMoveTop: () => void;
-  onMoveEnd: () => void;
-  onDelete: () => void;
-  onEdit: () => void;
+  id: "Merge" | "Script";
+  onChange?: (prev?: string, curr?: string) => void;
 }
 
 // profile enhanced item
 export const ProfileMore = (props: Props) => {
-  const {
-    selected,
-    itemData,
-    enableNum,
-    logInfo = [],
-    onEnable,
-    onDisable,
-    onMoveTop,
-    onMoveEnd,
-    onDelete,
-    onEdit,
-  } = props;
+  const { id, logInfo = [], onChange } = props;
 
-  const { uid, type } = itemData;
   const { t, i18n } = useTranslation();
   const [anchorEl, setAnchorEl] = useState<any>(null);
   const [position, setPosition] = useState({ left: 0, top: 0 });
   const [fileOpen, setFileOpen] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
-
-  const onEditInfo = () => {
-    setAnchorEl(null);
-    onEdit();
-  };
 
   const onEditFile = () => {
     setAnchorEl(null);
@@ -68,7 +41,7 @@ export const ProfileMore = (props: Props) => {
   const onOpenFile = useLockFn(async () => {
     setAnchorEl(null);
     try {
-      await viewProfile(itemData.uid);
+      await viewProfile(id);
     } catch (err: any) {
       Notice.error(err?.message || err.toString());
     }
@@ -80,36 +53,10 @@ export const ProfileMore = (props: Props) => {
   };
 
   const hasError = !!logInfo.find((e) => e[0] === "exception");
-  const showMove = enableNum > 1 && !hasError;
 
-  const enableMenu = [
-    { label: "Disable", handler: fnWrapper(onDisable) },
-    { label: "Edit Info", handler: onEditInfo },
+  const itemMenu = [
     { label: "Edit File", handler: onEditFile },
     { label: "Open File", handler: onOpenFile },
-    { label: "To Top", show: showMove, handler: fnWrapper(onMoveTop) },
-    { label: "To End", show: showMove, handler: fnWrapper(onMoveEnd) },
-    {
-      label: "Delete",
-      handler: () => {
-        setAnchorEl(null);
-        setConfirmOpen(true);
-      },
-    },
-  ];
-
-  const disableMenu = [
-    { label: "Enable", handler: fnWrapper(onEnable) },
-    { label: "Edit Info", handler: onEditInfo },
-    { label: "Edit File", handler: onEditFile },
-    { label: "Open File", handler: onOpenFile },
-    {
-      label: "Delete",
-      handler: () => {
-        setAnchorEl(null);
-        setConfirmOpen(true);
-      },
-    },
   ];
 
   const boxStyle = {
@@ -123,9 +70,7 @@ export const ProfileMore = (props: Props) => {
   return (
     <>
       <ProfileBox
-        aria-selected={selected}
         onDoubleClick={onEditFile}
-        // onClick={() => onSelect(false)}
         onContextMenu={(event) => {
           const { clientX, clientY } = event;
           setPosition({ top: clientY, left: clientX });
@@ -144,13 +89,13 @@ export const ProfileMore = (props: Props) => {
             variant="h6"
             component="h2"
             noWrap
-            title={itemData.name}
+            title={t(`Global ${id}`)}
           >
-            {itemData.name}
+            {t(`Global ${id}`)}
           </Typography>
 
           <Chip
-            label={type}
+            label={id}
             color="primary"
             size="small"
             variant="outlined"
@@ -159,14 +104,14 @@ export const ProfileMore = (props: Props) => {
         </Box>
 
         <Box sx={boxStyle}>
-          {selected && type === "script" ? (
+          {id === "Script" ? (
             hasError ? (
               <Badge color="error" variant="dot" overlap="circular">
                 <IconButton
                   size="small"
                   edge="start"
                   color="error"
-                  title="Console"
+                  title={t("Script Console")}
                   onClick={() => setLogOpen(true)}
                 >
                   <FeaturedPlayListRounded fontSize="inherit" />
@@ -177,7 +122,7 @@ export const ProfileMore = (props: Props) => {
                 size="small"
                 edge="start"
                 color="inherit"
-                title="Console"
+                title={t("Script Console")}
                 onClick={() => setLogOpen(true)}
               >
                 <FeaturedPlayListRounded fontSize="inherit" />
@@ -186,10 +131,10 @@ export const ProfileMore = (props: Props) => {
           ) : (
             <Typography
               noWrap
-              title={itemData.desc}
+              title={t(`${id} Description`)}
               sx={i18n.language === "zh" ? { width: "calc(100% - 75px)" } : {}}
             >
-              {itemData.desc}
+              {t(`${id} Description`)}
             </Typography>
           )}
         </Box>
@@ -208,7 +153,7 @@ export const ProfileMore = (props: Props) => {
           e.preventDefault();
         }}
       >
-        {(selected ? enableMenu : disableMenu)
+        {itemMenu
           .filter((item: any) => item.show !== false)
           .map((item) => (
             <MenuItem
@@ -233,33 +178,20 @@ export const ProfileMore = (props: Props) => {
       </Menu>
 
       <EditorViewer
-        uid={uid}
+        mode="profile"
+        property={id}
         open={fileOpen}
-        mode={type === "merge" ? "yaml" : "javascript"}
+        language={id === "Merge" ? "yaml" : "javascript"}
+        schema={id === "Merge" ? "merge" : undefined}
+        onChange={onChange}
         onClose={() => setFileOpen(false)}
       />
-      <ConfirmViewer
-        title="Confirm deletion"
-        message="This operation is not reversible"
-        open={confirmOpen}
-        onClose={() => setConfirmOpen(false)}
-        onConfirm={() => {
-          onDelete();
-          setConfirmOpen(false);
-        }}
+
+      <LogViewer
+        open={logOpen}
+        logInfo={logInfo}
+        onClose={() => setLogOpen(false)}
       />
-      {selected && (
-        <LogViewer
-          open={logOpen}
-          logInfo={logInfo}
-          onClose={() => setLogOpen(false)}
-        />
-      )}
     </>
   );
 };
-
-function parseExpire(expire?: number) {
-  if (!expire) return "-";
-  return dayjs(expire * 1000).format("YYYY-MM-DD");
-}

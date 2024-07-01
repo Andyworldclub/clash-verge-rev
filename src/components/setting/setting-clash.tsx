@@ -1,15 +1,8 @@
 import { useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { useLockFn } from "ahooks";
-import {
-  TextField,
-  Select,
-  MenuItem,
-  Typography,
-  IconButton,
-  Tooltip,
-} from "@mui/material";
-import { ArrowForward, Settings, Shuffle } from "@mui/icons-material";
+import { TextField, Select, MenuItem, Typography } from "@mui/material";
+
+import { Settings, Shuffle } from "@mui/icons-material";
 import { DialogRef, Notice, Switch } from "@/components/base";
 import { useClash } from "@/hooks/use-clash";
 import { GuardState } from "./mods/guard-state";
@@ -22,6 +15,7 @@ import { invoke_uwp_tool } from "@/services/cmds";
 import getSystem from "@/utils/get-system";
 import { useVerge } from "@/hooks/use-verge";
 import { updateGeoData } from "@/services/api";
+import { TooltipIcon } from "@/components/base/base-tooltip-icon";
 
 const isWIN = getSystem() === "windows";
 
@@ -51,14 +45,14 @@ const SettingClash = ({ onError }: Props) => {
   const onChangeVerge = (patch: Partial<IVergeConfig>) => {
     mutateVerge({ ...verge, ...patch }, false);
   };
-  const onUpdateGeo = useLockFn(async () => {
+  const onUpdateGeo = async () => {
     try {
       await updateGeoData();
-      Notice.success("Start update geodata");
+      Notice.success(t("GeoData Updated"));
     } catch (err: any) {
       Notice.error(err?.response.data.message || err.toString());
     }
-  });
+  };
 
   return (
     <SettingList title={t("Clash Setting")}>
@@ -115,22 +109,19 @@ const SettingClash = ({ onError }: Props) => {
       <SettingItem
         label={t("Port Config")}
         extra={
-          <Tooltip title={t("Random Port")}>
-            <IconButton
-              color={enable_random_port ? "primary" : "inherit"}
-              size="small"
-              onClick={() => {
-                Notice.success(t("After restart to take effect"), 1000);
-                onChangeVerge({ enable_random_port: !enable_random_port });
-                patchVerge({ enable_random_port: !enable_random_port });
-              }}
-            >
-              <Shuffle
-                fontSize="inherit"
-                style={{ cursor: "pointer", opacity: 0.75 }}
-              />
-            </IconButton>
-          </Tooltip>
+          <TooltipIcon
+            title={t("Random Port")}
+            color={enable_random_port ? "primary" : "inherit"}
+            icon={Shuffle}
+            onClick={() => {
+              Notice.success(
+                t("Restart Application to Apply Modifications"),
+                1000
+              );
+              onChangeVerge({ enable_random_port: !enable_random_port });
+              patchVerge({ enable_random_port: !enable_random_port });
+            }}
+          />
         }
       >
         <TextField
@@ -146,69 +137,34 @@ const SettingClash = ({ onError }: Props) => {
         />
       </SettingItem>
 
-      <SettingItem label={t("External")}>
-        <IconButton
-          color="inherit"
-          size="small"
-          sx={{ my: "2px" }}
-          onClick={() => ctrlRef.current?.open()}
-        >
-          <ArrowForward />
-        </IconButton>
-      </SettingItem>
+      <SettingItem
+        onClick={() => ctrlRef.current?.open()}
+        label={t("External")}
+      />
 
-      <SettingItem label={t("Web UI")}>
-        <IconButton
-          color="inherit"
-          size="small"
-          sx={{ my: "2px" }}
-          onClick={() => webRef.current?.open()}
-        >
-          <ArrowForward />
-        </IconButton>
-      </SettingItem>
+      <SettingItem onClick={() => webRef.current?.open()} label={t("Web UI")} />
 
       <SettingItem
         label={t("Clash Core")}
         extra={
-          <IconButton
-            color="inherit"
-            size="small"
+          <TooltipIcon
+            icon={Settings}
             onClick={() => coreRef.current?.open()}
-          >
-            <Settings
-              fontSize="inherit"
-              style={{ cursor: "pointer", opacity: 0.75 }}
-            />
-          </IconButton>
+          />
         }
       >
         <Typography sx={{ py: "7px", pr: 1 }}>{version}</Typography>
       </SettingItem>
 
       {isWIN && (
-        <SettingItem label={t("Open UWP tool")}>
-          <IconButton
-            color="inherit"
-            size="small"
-            sx={{ my: "2px" }}
-            onClick={invoke_uwp_tool}
-          >
-            <ArrowForward />
-          </IconButton>
-        </SettingItem>
+        <SettingItem
+          onClick={invoke_uwp_tool}
+          label={t("Open UWP tool")}
+          extra={<TooltipIcon title={t("Open UWP tool Info")} />}
+        />
       )}
 
-      <SettingItem label={t("Update GeoData")}>
-        <IconButton
-          color="inherit"
-          size="small"
-          sx={{ my: "2px" }}
-          onClick={onUpdateGeo}
-        >
-          <ArrowForward />
-        </IconButton>
-      </SettingItem>
+      <SettingItem onClick={onUpdateGeo} label={t("Update GeoData")} />
     </SettingList>
   );
 };
