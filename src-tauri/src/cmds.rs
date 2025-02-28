@@ -2,26 +2,51 @@ use crate::{
     config::*,
     core::*,
     feat,
-    utils::{dirs, help, resolve},
+    utils::{dirs, help},
 };
-use crate::{ret_err, wrap_err};
+use crate::{log_err, ret_err, wrap_err};
 use anyhow::{Context, Result};
+use network_interface::NetworkInterface;
 use serde_yaml::Mapping;
-use std::collections::{HashMap, VecDeque};
-use sysproxy::Sysproxy;
-use tauri::{api, Manager};
+use std::collections::HashMap;
+use sysproxy::{Autoproxy, Sysproxy};
 type CmdResult<T = ()> = Result<T, String>;
+use reqwest_dav::list_cmd::ListFile;
+use tauri::Manager;
+use std::fs;
+
+#[tauri::command]
+pub fn copy_clash_env() -> CmdResult {
+    feat::copy_clash_env();
+    Ok(())
+}
 
 #[tauri::command]
 pub fn get_profiles() -> CmdResult<IProfiles> {
+    let _ = tray::Tray::global().update_menu();
     Ok(Config::profiles().data().clone())
 }
 
 #[tauri::command]
 pub async fn enhance_profiles() -> CmdResult {
-    wrap_err!(CoreManager::global().update_config().await)?;
-    handle::Handle::refresh_clash();
-    Ok(())
+    match CoreManager::global().update_config().await {
+        Ok((true, _)) => {
+            println!("[enhance_profiles] 配置更新成功");
+            log_err!(tray::Tray::global().update_tooltip());
+            handle::Handle::refresh_clash();
+            Ok(())
+        }
+        Ok((false, error_msg)) => {
+            println!("[enhance_profiles] 配置验证失败: {}", error_msg);
+            handle::Handle::notice_message("config_validate::error", &error_msg);
+            Ok(())
+        }
+        Err(e) => {
+            println!("[enhance_profiles] 更新过程发生错误: {}", e);
+            handle::Handle::notice_message("config_validate::process_terminated", &e.to_string());
+            Ok(())
+        }
+    }
 }
 
 #[tauri::command]
@@ -53,35 +78,80 @@ pub async fn delete_profile(index: String) -> CmdResult {
         wrap_err!(CoreManager::global().update_config().await)?;
         handle::Handle::refresh_clash();
     }
-
     Ok(())
 }
 
-/// 修改profiles的
+/// 修改profiles的配置
 #[tauri::command]
-pub async fn patch_profiles_config(profiles: IProfiles) -> CmdResult {
+pub async fn patch_profiles_config(
+    profiles: IProfiles
+) -> CmdResult<bool> {
+    println!("[cmd配置patch] 开始修改配置文件");
+    
+    // 保存当前配置，以便在验证失败时恢复
+    let current_profile = Config::profiles().latest().current.clone();
+    println!("[cmd配置patch] 当前配置: {:?}", current_profile);
+    
+    // 更新profiles配置
+    println!("[cmd配置patch] 正在更新配置草稿");
     wrap_err!({ Config::profiles().draft().patch_config(profiles) })?;
-
+    
+    // 更新配置并进行验证
     match CoreManager::global().update_config().await {
-        Ok(_) => {
+        Ok((true, _)) => {
+            println!("[cmd配置patch] 配置更新成功");
             handle::Handle::refresh_clash();
+            let _ = tray::Tray::global().update_tooltip();
             Config::profiles().apply();
             wrap_err!(Config::profiles().data().save_file())?;
-            Ok(())
+            Ok(true)
         }
-        Err(err) => {
+        Ok((false, error_msg)) => {
+            println!("[cmd配置patch] 配置验证失败: {}", error_msg);
             Config::profiles().discard();
-            log::error!(target: "app", "{err}");
-            Err(format!("{err}"))
+            
+            // 如果验证失败，恢复到之前的配置
+            if let Some(prev_profile) = current_profile {
+                println!("[cmd配置patch] 尝试恢复到之前的配置: {}", prev_profile);
+                let restore_profiles = IProfiles {
+                    current: Some(prev_profile),
+                    items: None,
+                };
+                // 静默恢复，不触发验证
+                wrap_err!({ Config::profiles().draft().patch_config(restore_profiles) })?;
+                Config::profiles().apply();
+                wrap_err!(Config::profiles().data().save_file())?;
+                println!("[cmd配置patch] 成功恢复到之前的配置");
+            }
+
+            // 发送验证错误通知
+            handle::Handle::notice_message("config_validate::error", &error_msg);
+            Ok(false)
+        }
+        Err(e) => {
+            println!("[cmd配置patch] 更新过程发生错误: {}", e);
+            Config::profiles().discard();
+            handle::Handle::notice_message("config_validate::boot_error", &e.to_string());
+            Ok(false)
         }
     }
+}
+
+/// 根据profile name修改profiles
+#[tauri::command]
+pub async fn patch_profiles_config_by_profile_index(
+    _app_handle: tauri::AppHandle,
+    profile_index: String
+) -> CmdResult<bool> {
+    let profiles = IProfiles{current: Some(profile_index), items: None};
+    patch_profiles_config(profiles).await
 }
 
 /// 修改某个profile item的
 #[tauri::command]
 pub fn patch_profile(index: String, profile: PrfItem) -> CmdResult {
     wrap_err!(Config::profiles().data().patch_item(index, profile))?;
-    wrap_err!(timer::Timer::global().refresh())
+    Ok(())
 }
 
 #[tauri::command]
@@ -109,17 +179,107 @@ pub fn read_profile_file(index: String) -> CmdResult<String> {
     let data = wrap_err!(item.read_file())?;
     Ok(data)
 }
-
+/// 保存profiles的配置
 #[tauri::command]
-pub fn save_profile_file(index: String, file_data: Option<String>) -> CmdResult {
+pub async fn save_profile_file(index: String, file_data: Option<String>) -> CmdResult {
     if file_data.is_none() {
         return Ok(());
     }
 
-    let profiles = Config::profiles();
-    let profiles = profiles.latest();
-    let item = wrap_err!(profiles.get_item(&index))?;
-    wrap_err!(item.save_file(file_data.unwrap()))
+    // 在异步操作前完成所有文件操作
+    let (file_path, original_content, is_merge_file) = {
+        let profiles = Config::profiles();
+        let profiles_guard = profiles.latest();
+        let item = wrap_err!(profiles_guard.get_item(&index))?;
+        // 确定是否为merge类型文件
+        let is_merge = item.itype.as_ref().map_or(false, |t| t == "merge");
+        let content = wrap_err!(item.read_file())?;
+        let path = item.file.clone().ok_or("file field is null")?;
+        let profiles_dir = wrap_err!(dirs::app_profiles_dir())?;
+        (profiles_dir.join(path), content, is_merge)
+    };
+
+    // 保存新的配置文件
+    wrap_err!(fs::write(&file_path, file_data.clone().unwrap()))?;
+    
+    let file_path_str = file_path.to_string_lossy().to_string();
+    println!("[cmd配置save] 开始验证配置文件: {}, 是否为merge文件: {}", file_path_str, is_merge_file);
+    
+    // 对于 merge 文件，只进行语法验证，不进行后续内核验证
+    if is_merge_file {
+        println!("[cmd配置save] 检测到merge文件，只进行语法验证");
+        match CoreManager::global().validate_config_file(&file_path_str, Some(true)).await {
+            Ok((true, _)) => {
+                println!("[cmd配置save] merge文件语法验证通过");
+                // 成功后尝试更新整体配置
+                if let Err(e) = CoreManager::global().update_config().await {
+                    println!("[cmd配置save] 更新整体配置时发生错误: {}", e);
+                    log::warn!(target: "app", "更新整体配置时发生错误: {}", e);
+                }
+                return Ok(());
+            }
+            Ok((false, error_msg)) => {
+                println!("[cmd配置save] merge文件语法验证失败: {}", error_msg);
+                // 恢复原始配置文件
+                wrap_err!(fs::write(&file_path, original_content))?;
+                // 发送合并文件专用错误通知
+                let result = (false, error_msg.clone());
+                handle_yaml_validation_notice(&result, "合并配置文件");
+                return Ok(());
+            }
+            Err(e) => {
+                println!("[cmd配置save] 验证过程发生错误: {}", e);
+                // 恢复原始配置文件
+                wrap_err!(fs::write(&file_path, original_content))?;
+                return Err(e.to_string());
+            }
+        }
+    }
+    
+    // 非merge文件使用完整验证流程
+    match CoreManager::global().validate_config_file(&file_path_str, None).await {
+        Ok((true, _)) => {
+            println!("[cmd配置save] 验证成功");
+            Ok(())
+        }
+        Ok((false, error_msg)) => {
+            println!("[cmd配置save] 验证失败: {}", error_msg);
+            // 恢复原始配置文件
+            wrap_err!(fs::write(&file_path, original_content))?;
+            
+            // 智能判断错误类型
+            let is_script_error = file_path_str.ends_with(".js") || 
+                               error_msg.contains("Script syntax error") || 
+                               error_msg.contains("Script must contain a main function") ||
+                               error_msg.contains("Failed to read script file");
+            
+            if error_msg.contains("YAML syntax error") || 
+               error_msg.contains("Failed to read file:") ||
+               (!file_path_str.ends_with(".js") && !is_script_error) {
+                // 普通YAML错误使用YAML通知处理
+                println!("[cmd配置save] YAML配置文件验证失败，发送通知");
+                let result = (false, error_msg.clone());
+                handle_yaml_validation_notice(&result, "YAML配置文件");
+            } else if is_script_error {
+                // 脚本错误使用专门的通知处理
+                println!("[cmd配置save] 脚本文件验证失败，发送通知");
+                let result = (false, error_msg.clone());
+                handle_script_validation_notice(&result, "脚本文件");
+            } else {
+                // 普通配置错误使用一般通知
+                println!("[cmd配置save] 其他类型验证失败，发送一般通知");
+                handle::Handle::notice_message("config_validate::error", &error_msg);
+            }
+            
+            Ok(())
+        }
+        Err(e) => {
+            println!("[cmd配置save] 验证过程发生错误: {}", e);
+            // 恢复原始配置文件
+            wrap_err!(fs::write(&file_path, original_content))?;
+            Err(e.to_string())
+        }
+    }
 }
 
 #[tauri::command]
@@ -160,40 +320,53 @@ pub async fn patch_clash_config(payload: Mapping) -> CmdResult {
 }
 
 #[tauri::command]
-pub fn get_verge_config() -> CmdResult<IVerge> {
-    Ok(Config::verge().data().clone())
+pub async fn patch_clash_mode(payload: String) -> CmdResult {
+    Ok(feat::change_clash_mode(payload))
+}
+
+
+#[tauri::command]
+pub fn get_verge_config() -> CmdResult<IVergeResponse> {
+    let verge = Config::verge();
+    let verge_data = verge.data().clone();
+    Ok(IVergeResponse::from(verge_data))
 }
 
 #[tauri::command]
 pub async fn patch_verge_config(payload: IVerge) -> CmdResult {
-    wrap_err!(feat::patch_verge(payload).await)
+    wrap_err!(feat::patch_verge(payload, false).await)
 }
 
 #[tauri::command]
-pub async fn change_clash_core(clash_core: Option<String>) -> CmdResult {
-    wrap_err!(CoreManager::global().change_core(clash_core).await)
+pub async fn change_clash_core(clash_core: String) -> CmdResult<Option<String>> {
+    log::info!(target: "app", "changing core to {clash_core}");
+    
+    match CoreManager::global().change_core(Some(clash_core.clone())).await {
+        Ok(_) => {
+            log::info!(target: "app", "core changed to {clash_core}");
+            handle::Handle::notice_message("config_core::change_success", &clash_core);
+            handle::Handle::refresh_clash();
+            Ok(None)
+        }
+        Err(err) => {
+            let error_msg = err.to_string();
+            log::error!(target: "app", "failed to change core: {error_msg}");
+            handle::Handle::notice_message("config_core::change_error", &error_msg);
+            Ok(Some(error_msg))
+        }
+    }
 }
 
 /// restart the sidecar
 #[tauri::command]
-pub async fn restart_sidecar() -> CmdResult {
-    wrap_err!(CoreManager::global().run_core().await)
-}
-
-#[tauri::command]
-pub fn grant_permission(_core: String) -> CmdResult {
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    return wrap_err!(manager::grant_permission(_core));
-
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    return Err("Unsupported target".into());
+pub async fn restart_core() -> CmdResult {
+    wrap_err!(CoreManager::global().restart_core().await)
 }
 
 /// get the system proxy
 #[tauri::command]
 pub fn get_sys_proxy() -> CmdResult<Mapping> {
     let current = wrap_err!(Sysproxy::get_system_proxy())?;
-
     let mut map = Mapping::new();
     map.insert("enable".into(), current.enable.into());
     map.insert(
@@ -205,9 +378,16 @@ pub fn get_sys_proxy() -> CmdResult<Mapping> {
     Ok(map)
 }
 
+/// get the system proxy
 #[tauri::command]
-pub fn get_clash_logs() -> CmdResult<VecDeque<String>> {
-    Ok(logger::Logger::global().get_log())
+pub fn get_auto_proxy() -> CmdResult<Mapping> {
+    let current = wrap_err!(Autoproxy::get_auto_proxy())?;
+
+    let mut map = Mapping::new();
+    map.insert("enable".into(), current.enable.into());
+    map.insert("url".into(), current.url.into());
+
+    Ok(map)
 }
 
 #[tauri::command]
@@ -299,21 +479,59 @@ pub fn copy_icon_file(path: String, name: String) -> CmdResult<String> {
     if !icon_dir.exists() {
         let _ = std::fs::create_dir_all(&icon_dir);
     }
-    let dest_path = icon_dir.join(name);
+    let ext = match file_path.extension() {
+        Some(e) => e.to_string_lossy().to_string(),
+        None => "ico".to_string(),
+    };
 
+    let png_dest_path = icon_dir.join(format!("{name}.png"));
+    let ico_dest_path = icon_dir.join(format!("{name}.ico"));
+    let dest_path = icon_dir.join(format!("{name}.{ext}"));
     if file_path.exists() {
+        std::fs::remove_file(png_dest_path).unwrap_or_default();
+        std::fs::remove_file(ico_dest_path).unwrap_or_default();
         match std::fs::copy(file_path, &dest_path) {
             Ok(_) => Ok(dest_path.to_string_lossy().to_string()),
             Err(err) => Err(err.to_string()),
         }
     } else {
-        return Err("file not found".to_string());
+        Err("file not found".to_string())
     }
 }
 
 #[tauri::command]
+pub fn get_network_interfaces() -> Vec<String> {
+    use sysinfo::Networks;
+    let mut result = Vec::new();
+    let networks = Networks::new_with_refreshed_list();
+    for (interface_name, _) in &networks {
+        result.push(interface_name.clone());
+    }
+    result
+}
+
+#[tauri::command]
+pub fn get_network_interfaces_info() -> CmdResult<Vec<NetworkInterface>> {
+    use network_interface::NetworkInterface;
+    use network_interface::NetworkInterfaceConfig;
+
+    let names = get_network_interfaces();
+    let interfaces = wrap_err!(NetworkInterface::show())?;
+
+    let mut result = Vec::new();
+
+    for interface in interfaces {
+        if names.contains(&interface.name) {
+            result.push(interface);
+        }
+    }
+
+    Ok(result)
+}
+
+#[tauri::command]
 pub fn open_devtools(app_handle: tauri::AppHandle) {
-    if let Some(window) = app_handle.get_window("main") {
+    if let Some(window) = app_handle.get_webview_window("main") {
         if !window.is_devtools_open() {
             window.open_devtools();
         } else {
@@ -323,32 +541,52 @@ pub fn open_devtools(app_handle: tauri::AppHandle) {
 }
 
 #[tauri::command]
-pub fn exit_app(app_handle: tauri::AppHandle) {
-    let _ = resolve::save_window_size_position(&app_handle, true);
-    resolve::resolve_reset();
-    api::process::kill_children();
-    app_handle.exit(0);
-    std::process::exit(0);
+pub fn exit_app() {
+    feat::quit(Some(0));
 }
 
-pub mod service {
-    use super::*;
-    use crate::core::service;
+#[tauri::command]
+pub async fn save_webdav_config(url: String, username: String, password: String) -> CmdResult<()> {
+    let patch = IVerge {
+        webdav_url: Some(url),
+        webdav_username: Some(username),
+        webdav_password: Some(password),
+        ..IVerge::default()
+    };
+    Config::verge().draft().patch_config(patch.clone());
+    Config::verge().apply();
+    Config::verge()
+        .data()
+        .save_file()
+        .map_err(|err| err.to_string())?;
+    backup::WebDavClient::global().reset();
+    Ok(())
+}
 
-    #[tauri::command]
-    pub async fn check_service() -> CmdResult<service::JsonResponse> {
-        wrap_err!(service::check_service().await)
-    }
+#[tauri::command]
+pub async fn create_webdav_backup() -> CmdResult<()> {
+    wrap_err!(feat::create_backup_and_upload_webdav().await)
+}
 
-    #[tauri::command]
-    pub async fn install_service() -> CmdResult {
-        wrap_err!(service::install_service().await)
-    }
+#[tauri::command]
+pub async fn list_webdav_backup() -> CmdResult<Vec<ListFile>> {
+    wrap_err!(feat::list_wevdav_backup().await)
+}
 
-    #[tauri::command]
-    pub async fn uninstall_service() -> CmdResult {
-        wrap_err!(service::uninstall_service().await)
-    }
+#[tauri::command]
+pub async fn delete_webdav_backup(filename: String) -> CmdResult<()> {
+    wrap_err!(feat::delete_webdav_backup(filename).await)
+}
+
+#[tauri::command]
+pub async fn restore_webdav_backup(filename: String) -> CmdResult<()> {
+    wrap_err!(feat::restore_webdav_backup(filename).await)
+}
+
+#[tauri::command]
+pub async fn restart_app() -> CmdResult<()> {
+    feat::restart_app();
+    Ok(())
 }
 
 #[cfg(not(windows))]
@@ -358,5 +596,103 @@ pub mod uwp {
     #[tauri::command]
     pub async fn invoke_uwp_tool() -> CmdResult {
         Ok(())
+    }
+}
+
+#[tauri::command]
+pub async fn script_validate_notice(status: String, msg: String) -> CmdResult {
+    handle::Handle::notice_message(&status, &msg);
+    Ok(())
+}
+
+/// 处理脚本验证相关的所有消息通知
+/// 统一通知接口，保持消息类型一致性
+pub fn handle_script_validation_notice(result: &(bool, String), file_type: &str) {
+    if !result.0 {
+        let error_msg = &result.1;
+        
+        // 根据错误消息内容判断错误类型
+        let status = if error_msg.starts_with("File not found:") {
+            "config_validate::file_not_found"
+        } else if error_msg.starts_with("Failed to read script file:") {
+            "config_validate::script_error"
+        } else if error_msg.starts_with("Script syntax error:") {
+            "config_validate::script_syntax_error"
+        } else if error_msg == "Script must contain a main function" {
+            "config_validate::script_missing_main"
+        } else {
+            // 如果是其他类型错误，作为一般脚本错误处理
+            "config_validate::script_error"
+        };
+        
+        log::warn!(target: "app", "{} 验证失败: {}", file_type, error_msg);
+        handle::Handle::notice_message(status, error_msg);
+    }
+}
+
+/// 验证指定脚本文件
+#[tauri::command]
+pub async fn validate_script_file(file_path: String) -> CmdResult<bool> {
+    log::info!(target: "app", "验证脚本文件: {}", file_path);
+    
+    match CoreManager::global().validate_config_file(&file_path, None).await {
+        Ok(result) => {
+            handle_script_validation_notice(&result, "脚本文件");
+            Ok(result.0)  // 返回验证结果布尔值
+        },
+        Err(e) => {
+            let error_msg = e.to_string();
+            log::error!(target: "app", "验证脚本文件过程发生错误: {}", error_msg);
+            handle::Handle::notice_message("config_validate::process_terminated", &error_msg);
+            Ok(false)
+        }
+    }
+}
+
+/// 处理YAML验证相关的所有消息通知
+/// 统一通知接口，保持消息类型一致性
+pub fn handle_yaml_validation_notice(result: &(bool, String), file_type: &str) {
+    if !result.0 {
+        let error_msg = &result.1;
+        println!("[通知] 处理{}验证错误: {}", file_type, error_msg);
+        
+        // 检查是否为merge文件
+        let is_merge_file = file_type.contains("合并");
+        
+        // 根据错误消息内容判断错误类型
+        let status = if error_msg.starts_with("File not found:") {
+            "config_validate::file_not_found"
+        } else if error_msg.starts_with("Failed to read file:") {
+            "config_validate::yaml_read_error"
+        } else if error_msg.starts_with("YAML syntax error:") {
+            if is_merge_file {
+                "config_validate::merge_syntax_error"
+            } else {
+                "config_validate::yaml_syntax_error"
+            }
+        } else if error_msg.contains("mapping values are not allowed") {
+            if is_merge_file {
+                "config_validate::merge_mapping_error"
+            } else {
+                "config_validate::yaml_mapping_error"
+            }
+        } else if error_msg.contains("did not find expected key") {
+            if is_merge_file {
+                "config_validate::merge_key_error"
+            } else {
+                "config_validate::yaml_key_error"
+            }
+        } else {
+            // 如果是其他类型错误，根据文件类型作为一般错误处理
+            if is_merge_file {
+                "config_validate::merge_error"
+            } else {
+                "config_validate::yaml_error"
+            }
+        };
+        
+        log::warn!(target: "app", "{} 验证失败: {}", file_type, error_msg);
+        println!("[通知] 发送通知: status={}, msg={}", status, error_msg);
+        handle::Handle::notice_message(status, error_msg);
     }
 }

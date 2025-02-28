@@ -5,11 +5,17 @@ use serde::{Deserialize, Serialize};
 use serde_yaml::Mapping;
 use std::collections::HashMap;
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Rate {
+    pub up: u64,
+    pub down: u64,
+}
+
 /// PUT /configs
 /// path 是绝对路径
 pub async fn put_configs(path: &str) -> Result<()> {
     let (url, headers) = clash_client_info()?;
-    let url = format!("{url}/configs");
+    let url = format!("{url}/configs?force=true");
 
     let mut data = HashMap::new();
     data.insert("path", path);
@@ -21,7 +27,9 @@ pub async fn put_configs(path: &str) -> Result<()> {
     match response.status().as_u16() {
         204 => Ok(()),
         status => {
-            bail!("failed to put configs with status \"{status}\"")
+            let body = response.text().await?;
+           // print!("failed to put configs with status \"{}\"\n{}\n{}", status, url, body);
+            bail!("failed to put configs with status \"{status}\"\n{url}\n{body}");
         }
     }
 }
@@ -52,7 +60,7 @@ pub async fn get_proxy_delay(
     let (url, headers) = clash_client_info()?;
     let url = format!("{url}/proxies/{name}/delay");
 
-    let default_url = "http://1.1.1.1";
+    let default_url = "http://cp.cloudflare.com/generate_204";
     let test_url = test_url
         .map(|s| if s.is_empty() { default_url.into() } else { s })
         .unwrap_or(default_url.into());
@@ -85,6 +93,7 @@ fn clash_client_info() -> Result<(String, HeaderMap)> {
 }
 
 /// 缩短clash的日志
+#[allow(dead_code)]
 pub fn parse_log(log: String) -> String {
     if log.starts_with("time=") && log.len() > 33 {
         return (log[33..]).to_owned();
@@ -95,8 +104,7 @@ pub fn parse_log(log: String) -> String {
     log
 }
 
-/// 缩短clash -t的错误输出
-/// 仅适配 clash p核 8-26、clash meta 1.13.1
+#[allow(dead_code)]
 pub fn parse_check_output(log: String) -> String {
     let t = log.find("time=");
     let m = log.find("msg=");
@@ -123,10 +131,17 @@ pub fn parse_check_output(log: String) -> String {
     log
 }
 
+#[cfg(target_os = "macos")]
+pub fn get_traffic_ws_url() -> Result<String> {
+    let (url, _) = clash_client_info()?;
+    let ws_url = url.replace("http://", "ws://") + "/traffic";
+    Ok(ws_url)
+}
+
 #[test]
 fn test_parse_check_output() {
     let str1 = r#"xxxx\n time="2022-11-18T20:42:58+08:00" level=error msg="proxy 0: 'alpn' expected type 'string', got unconvertible type '[]interface {}'""#;
-    let str2 = r#"20:43:49 ERR [Config] configuration file test failed error=proxy 0: unsupport proxy type: hysteria path=xxx"#;
+    //let str2 = r#"20:43:49 ERR [Config] configuration file test failed error=proxy 0: unsupport proxy type: hysteria path=xxx"#;
     let str3 = r#"
     "time="2022-11-18T21:38:01+08:00" level=info msg="Start initial configuration in progress"
     time="2022-11-18T21:38:01+08:00" level=error msg="proxy 0: 'alpn' expected type 'string', got unconvertible type '[]interface {}'"
@@ -134,12 +149,8 @@ fn test_parse_check_output() {
     "#;
 
     let res1 = parse_check_output(str1.into());
-    let res2 = parse_check_output(str2.into());
+    // let res2 = parse_check_output(str2.into());
     let res3 = parse_check_output(str3.into());
-
-    println!("res1: {res1}");
-    println!("res2: {res2}");
-    println!("res3: {res3}");
 
     assert_eq!(res1, res3);
 }

@@ -8,9 +8,11 @@ import {
   MenuItem,
   Select,
   TextField,
+  InputAdornment,
 } from "@mui/material";
 import { useVerge } from "@/hooks/use-verge";
 import { BaseDialog, DialogRef, Notice, Switch } from "@/components/base";
+import { TooltipIcon } from "@/components/base/base-tooltip-icon";
 
 export const MiscViewer = forwardRef<DialogRef>((props, ref) => {
   const { t } = useTranslation();
@@ -81,12 +83,12 @@ export const MiscViewer = forwardRef<DialogRef>((props, ref) => {
             size="small"
             sx={{ width: 100, "> div": { py: "7.5px" } }}
             value={values.appLogLevel}
-            onChange={(e) => {
+            onChange={(e) =>
               setValues((v) => ({
                 ...v,
                 appLogLevel: e.target.value as string,
-              }));
-            }}
+              }))
+            }
           >
             {["trace", "debug", "info", "warn", "error", "silent"].map((i) => (
               <MenuItem value={i} key={i}>
@@ -97,13 +99,21 @@ export const MiscViewer = forwardRef<DialogRef>((props, ref) => {
         </ListItem>
 
         <ListItem sx={{ padding: "5px 2px" }}>
-          <ListItemText primary={t("Auto Close Connections")} />
+          <ListItemText
+            primary={t("Auto Close Connections")}
+            sx={{ maxWidth: "fit-content" }}
+          />
+          <TooltipIcon
+            title={t("Auto Close Connections Info")}
+            sx={{ opacity: "0.7" }}
+          />
           <Switch
             edge="end"
             checked={values.autoCloseConnection}
             onChange={(_, c) =>
               setValues((v) => ({ ...v, autoCloseConnection: c }))
             }
+            sx={{ marginLeft: "auto" }}
           />
         </ListItem>
 
@@ -119,31 +129,39 @@ export const MiscViewer = forwardRef<DialogRef>((props, ref) => {
         </ListItem>
 
         <ListItem sx={{ padding: "5px 2px" }}>
-          <ListItemText primary={t("Enable Builtin Enhanced")} />
+          <ListItemText
+            primary={t("Enable Builtin Enhanced")}
+            sx={{ maxWidth: "fit-content" }}
+          />
+          <TooltipIcon
+            title={t("Enable Builtin Enhanced Info")}
+            sx={{ opacity: "0.7" }}
+          />
           <Switch
             edge="end"
             checked={values.enableBuiltinEnhanced}
             onChange={(_, c) =>
               setValues((v) => ({ ...v, enableBuiltinEnhanced: c }))
             }
+            sx={{ marginLeft: "auto" }}
           />
         </ListItem>
 
         <ListItem sx={{ padding: "5px 2px" }}>
-          <ListItemText primary={t("Proxy Layout Column")} />
+          <ListItemText primary={t("Proxy Layout Columns")} />
           <Select
             size="small"
             sx={{ width: 135, "> div": { py: "7.5px" } }}
             value={values.proxyLayoutColumn}
-            onChange={(e) => {
+            onChange={(e) =>
               setValues((v) => ({
                 ...v,
                 proxyLayoutColumn: e.target.value as number,
-              }));
-            }}
+              }))
+            }
           >
             <MenuItem value={6} key={6}>
-              Auto
+              {t("Auto Columns")}
             </MenuItem>
             {[1, 2, 3, 4, 5].map((i) => (
               <MenuItem value={i} key={i}>
@@ -159,37 +177,44 @@ export const MiscViewer = forwardRef<DialogRef>((props, ref) => {
             size="small"
             sx={{ width: 135, "> div": { py: "7.5px" } }}
             value={values.autoLogClean}
-            onChange={(e) => {
+            onChange={(e) =>
               setValues((v) => ({
                 ...v,
                 autoLogClean: e.target.value as number,
-              }));
-            }}
+              }))
+            }
           >
             {[
-              { key: "Never Clean", value: 0 },
-              { key: "Retain 7 Days", value: 1 },
-              { key: "Retain 30 Days", value: 2 },
-              { key: "Retain 90 Days", value: 3 },
+              { key: t("Never Clean"), value: 0 },
+              { key: t("Retain _n Days", { n: 7 }), value: 1 },
+              { key: t("Retain _n Days", { n: 30 }), value: 2 },
+              { key: t("Retain _n Days", { n: 90 }), value: 3 },
             ].map((i) => (
               <MenuItem key={i.value} value={i.value}>
-                {t(i.key)}
+                {i.key}
               </MenuItem>
             ))}
           </Select>
         </ListItem>
 
         <ListItem sx={{ padding: "5px 2px" }}>
-          <ListItemText primary={t("Default Latency Test")} />
+          <ListItemText
+            primary={t("Default Latency Test")}
+            sx={{ maxWidth: "fit-content" }}
+          />
+          <TooltipIcon
+            title={t("Default Latency Test Info")}
+            sx={{ opacity: "0.7" }}
+          />
           <TextField
+            autoComplete="new-password"
             size="small"
-            autoComplete="off"
             autoCorrect="off"
             autoCapitalize="off"
             spellCheck="false"
-            sx={{ width: 250 }}
+            sx={{ width: 250, marginLeft: "auto" }}
             value={values.defaultLatencyTest}
-            placeholder="http://1.1.1.1"
+            placeholder="http://cp.cloudflare.com/generate_204"
             onChange={(e) =>
               setValues((v) => ({ ...v, defaultLatencyTest: e.target.value }))
             }
@@ -199,9 +224,9 @@ export const MiscViewer = forwardRef<DialogRef>((props, ref) => {
         <ListItem sx={{ padding: "5px 2px" }}>
           <ListItemText primary={t("Default Latency Timeout")} />
           <TextField
+            autoComplete="new-password"
             size="small"
             type="number"
-            autoComplete="off"
             autoCorrect="off"
             autoCapitalize="off"
             spellCheck="false"
@@ -214,6 +239,11 @@ export const MiscViewer = forwardRef<DialogRef>((props, ref) => {
                 defaultLatencyTimeout: parseInt(e.target.value),
               }))
             }
+            InputProps={{
+              endAdornment: (
+                <InputAdornment position="end">{t("millis")}</InputAdornment>
+              ),
+            }}
           />
         </ListItem>
       </List>

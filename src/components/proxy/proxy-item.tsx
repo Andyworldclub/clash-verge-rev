@@ -31,7 +31,7 @@ const Widget = styled(Box)(() => ({
   borderRadius: "4px",
 }));
 
-const TypeBox = styled(Box)(({ theme }) => ({
+const TypeBox = styled("span")(({ theme }) => ({
   display: "inline-block",
   border: "1px solid #ccc",
   borderColor: alpha(theme.palette.text.secondary, 0.36),
@@ -46,12 +46,15 @@ const TypeBox = styled(Box)(({ theme }) => ({
 export const ProxyItem = (props: Props) => {
   const { group, proxy, selected, showType = true, sx, onClick } = props;
 
+  const presetList = ["DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE"];
+  const isPreset = presetList.includes(proxy.name);
   // -1/<=0 为 不显示
   // -2 为 loading
   const [delay, setDelay] = useState(-1);
   const { verge } = useVerge();
   const timeout = verge?.default_latency_timeout || 10000;
   useEffect(() => {
+    if (isPreset) return;
     delayManager.setListener(proxy.name, group.name, setDelay);
 
     return () => {
@@ -118,20 +121,24 @@ export const ProxyItem = (props: Props) => {
                 {showType && proxy.now && ` - ${proxy.now}`}
               </Box>
               {showType && !!proxy.provider && (
-                <TypeBox component="span">{proxy.provider}</TypeBox>
+                <TypeBox>{proxy.provider}</TypeBox>
               )}
-              {showType && <TypeBox component="span">{proxy.type}</TypeBox>}
-              {showType && proxy.udp && <TypeBox component="span">UDP</TypeBox>}
-              {showType && proxy.xudp && (
-                <TypeBox component="span">XUDP</TypeBox>
-              )}
-              {showType && proxy.tfo && <TypeBox component="span">TFO</TypeBox>}
+              {showType && <TypeBox>{proxy.type}</TypeBox>}
+              {showType && proxy.udp && <TypeBox>UDP</TypeBox>}
+              {showType && proxy.xudp && <TypeBox>XUDP</TypeBox>}
+              {showType && proxy.tfo && <TypeBox>TFO</TypeBox>}
+              {showType && proxy.mptcp && <TypeBox>MPTCP</TypeBox>}
+              {showType && proxy.smux && <TypeBox>SMUX</TypeBox>}
             </>
           }
         />
 
         <ListItemIcon
-          sx={{ justifyContent: "flex-end", color: "primary.main" }}
+          sx={{
+            justifyContent: "flex-end",
+            color: "primary.main",
+            display: isPreset ? "none" : "",
+          }}
         >
           {delay === -2 && (
             <Widget>

@@ -1,12 +1,9 @@
+use crate::enhance::seq::SeqMap;
 use anyhow::{anyhow, bail, Context, Result};
 use nanoid::nanoid;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_yaml::{Mapping, Value};
 use std::{fs, path::PathBuf, str::FromStr};
-use tauri::{
-    api::shell::{open, Program},
-    Manager,
-};
 
 /// read data from yaml as struct T
 pub fn read_yaml<T: DeserializeOwned>(path: &PathBuf) -> Result<T> {
@@ -26,7 +23,7 @@ pub fn read_yaml<T: DeserializeOwned>(path: &PathBuf) -> Result<T> {
 }
 
 /// read mapping from yaml fix #165
-pub fn read_merge_mapping(path: &PathBuf) -> Result<Mapping> {
+pub fn read_mapping(path: &PathBuf) -> Result<Mapping> {
     let mut val: Value = read_yaml(path)?;
     val.apply_merge()
         .with_context(|| format!("failed to apply merge \"{}\"", path.display()))?;
@@ -38,6 +35,13 @@ pub fn read_merge_mapping(path: &PathBuf) -> Result<Mapping> {
             path.display()
         ))?
         .to_owned())
+}
+
+/// read mapping from yaml fix #165
+pub fn read_seq_map(path: &PathBuf) -> Result<SeqMap> {
+    let val: SeqMap = read_yaml(path)?;
+
+    Ok(val)
 }
 
 /// save the data to the file
@@ -94,23 +98,42 @@ pub fn get_last_part_and_decode(url: &str) -> Option<String> {
 }
 
 /// open file
-/// use vscode by default
-pub fn open_file(app: tauri::AppHandle, path: PathBuf) -> Result<()> {
-    #[cfg(target_os = "macos")]
-    let code = "Visual Studio Code";
-    #[cfg(not(target_os = "macos"))]
-    let code = "code";
-
-    let _ = match Program::from_str(code) {
-        Ok(code) => open(&app.shell_scope(), path.to_string_lossy(), Some(code)),
-        Err(err) => {
-            log::error!(target: "app", "Can't find VScode `{err}`");
-            // default open
-            open(&app.shell_scope(), path.to_string_lossy(), None)
-        }
-    };
-
+pub fn open_file(_: tauri::AppHandle, path: PathBuf) -> Result<()> {
+    open::that_detached(path.as_os_str())?;
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+pub fn is_monochrome_image_from_bytes(data: &[u8]) -> anyhow::Result<bool> {
+    let img = image::load_from_memory(data)?;
+    let rgb_img = img.to_rgb8();
+
+    for pixel in rgb_img.pixels() {
+        if pixel[0] != pixel[1] || pixel[1] != pixel[2] {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+#[cfg(target_os = "linux")]
+pub fn linux_elevator() -> String {
+    use std::process::Command;
+    match Command::new("which").arg("pkexec").output() {
+        Ok(output) => {
+            if !output.stdout.is_empty() {
+                // Convert the output to a string slice
+                if let Ok(path) = std::str::from_utf8(&output.stdout) {
+                    path.trim().to_string()
+                } else {
+                    "sudo".to_string()
+                }
+            } else {
+                "sudo".to_string()
+            }
+        }
+        Err(_) => "sudo".to_string(),
+    }
 }
 
 #[macro_export]
@@ -167,22 +190,47 @@ macro_rules! ret_err {
     };
 }
 
+#[macro_export]
+macro_rules! t {
+    ($en:expr, $zh:expr, $use_zh:expr) => {
+        if $use_zh {
+            $zh
+        } else {
+            $en
+        }
+    };
+}
+
+/// 将字节数转换为可读的流量字符串
+/// 支持 B/s、KB/s、MB/s、GB/s 的自动转换
+///
+/// # Examples
+/// ```
+/// assert_eq!(format_bytes_speed(1000), "1000B/s");
+/// assert_eq!(format_bytes_speed(1024), "1.0KB/s");
+/// assert_eq!(format_bytes_speed(1024 * 1024), "1.0MB/s");
+/// ```
+#[cfg(target_os = "macos")]
+pub fn format_bytes_speed(speed: u64) -> String {
+    if speed < 1024 {
+        format!("{}B/s", speed)
+    } else if speed < 1024 * 1024 {
+        format!("{:.1}KB/s", speed as f64 / 1024.0)
+    } else if speed < 1024 * 1024 * 1024 {
+        format!("{:.1}MB/s", speed as f64 / 1024.0 / 1024.0)
+    } else {
+        format!("{:.1}GB/s", speed as f64 / 1024.0 / 1024.0 / 1024.0)
+    }
+}
+
+#[cfg(target_os = "macos")]
 #[test]
-fn test_parse_value() {
-    let test_1 = "upload=111; download=2222; total=3333; expire=444";
-    let test_2 = "attachment; filename=Clash.yaml";
-
-    assert_eq!(parse_str::<usize>(test_1, "upload").unwrap(), 111);
-    assert_eq!(parse_str::<usize>(test_1, "download").unwrap(), 2222);
-    assert_eq!(parse_str::<usize>(test_1, "total").unwrap(), 3333);
-    assert_eq!(parse_str::<usize>(test_1, "expire").unwrap(), 444);
-    assert_eq!(
-        parse_str::<String>(test_2, "filename").unwrap(),
-        format!("Clash.yaml")
-    );
-
-    assert_eq!(parse_str::<usize>(test_1, "aaa"), None);
-    assert_eq!(parse_str::<usize>(test_1, "upload1"), None);
-    assert_eq!(parse_str::<usize>(test_1, "expire1"), None);
-    assert_eq!(parse_str::<usize>(test_2, "attachment"), None);
+fn test_format_bytes_speed() {
+    assert_eq!(format_bytes_speed(0), "0B/s");
+    assert_eq!(format_bytes_speed(1023), "1023B/s");
+    assert_eq!(format_bytes_speed(1024), "1.0KB/s");
+    assert_eq!(format_bytes_speed(1024 * 1024), "1.0MB/s");
+    assert_eq!(format_bytes_speed(1024 * 1024 * 1024), "1.0GB/s");
+    assert_eq!(format_bytes_speed(1024 * 500), "500.0KB/s");
+    assert_eq!(format_bytes_speed(1024 * 1024 * 2), "2.0MB/s");
 }

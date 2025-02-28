@@ -17,10 +17,9 @@ import { ProxyItem } from "./proxy-item";
 import { ProxyItemMini } from "./proxy-item-mini";
 import type { IRenderItem } from "./use-render-list";
 import { useVerge } from "@/hooks/use-verge";
-import { useRecoilState } from "recoil";
-import { atomThemeMode } from "@/services/states";
-import { useEffect, useState } from "react";
-import { convertFileSrc } from "@tauri-apps/api/tauri";
+import { useThemeMode } from "@/services/states";
+import { useEffect, useMemo, useState } from "react";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { downloadIconCache } from "@/services/cmds";
 
 interface RenderProps {
@@ -38,7 +37,7 @@ export const ProxyRender = (props: RenderProps) => {
   const { type, group, headState, proxy, proxyCol } = item;
   const { verge } = useVerge();
   const enable_group_icon = verge?.enable_group_icon ?? true;
-  const [mode] = useRecoilState(atomThemeMode);
+  const mode = useThemeMode();
   const isDark = mode === "light" ? false : true;
   const itembackgroundcolor = isDark ? "#282A36" : "#ffffff";
   const [iconCachePath, setIconCachePath] = useState("");
@@ -60,7 +59,7 @@ export const ProxyRender = (props: RenderProps) => {
     return url.substring(url.lastIndexOf("/") + 1);
   }
 
-  if (type === 0 && !group.hidden) {
+  if (type === 0) {
     return (
       <ListItemButton
         dense
@@ -101,7 +100,7 @@ export const ProxyRender = (props: RenderProps) => {
         <ListItemText
           primary={<StyledPrimary>{group.name}</StyledPrimary>}
           secondary={
-            <ListItemTextChild
+            <Box
               sx={{
                 overflow: "hidden",
                 display: "flex",
@@ -109,16 +108,19 @@ export const ProxyRender = (props: RenderProps) => {
                 pt: "2px",
               }}
             >
-              <Box sx={{ marginTop: "2px" }}>
+              <Box component="span" sx={{ marginTop: "2px" }}>
                 <StyledTypeBox>{group.type}</StyledTypeBox>
                 <StyledSubtitle sx={{ color: "text.secondary" }}>
                   {group.now}
                 </StyledSubtitle>
               </Box>
-            </ListItemTextChild>
+            </Box>
           }
-          secondaryTypographyProps={{
-            sx: { display: "flex", alignItems: "center", color: "#ccc" },
+          slotProps={{
+            secondary: {
+              component: "div",
+              sx: { display: "flex", alignItems: "center", color: "#ccc" },
+            },
           }}
         />
         {headState?.open ? <ExpandLessRounded /> : <ExpandMoreRounded />}
@@ -126,10 +128,11 @@ export const ProxyRender = (props: RenderProps) => {
     );
   }
 
-  if (type === 1 && !group.hidden) {
+  if (type === 1) {
     return (
       <ProxyHead
         sx={{ pl: 2, pr: 3, mt: indent ? 1 : 0.5, mb: 1 }}
+        url={group.testUrl}
         groupName={group.name}
         headState={headState!}
         onLocation={() => onLocation(group)}
@@ -139,7 +142,7 @@ export const ProxyRender = (props: RenderProps) => {
     );
   }
 
-  if (type === 2 && !group.hidden) {
+  if (type === 2) {
     return (
       <ProxyItem
         group={group}
@@ -152,7 +155,7 @@ export const ProxyRender = (props: RenderProps) => {
     );
   }
 
-  if (type === 3 && !group.hidden) {
+  if (type === 3) {
     return (
       <Box
         sx={{
@@ -170,7 +173,19 @@ export const ProxyRender = (props: RenderProps) => {
     );
   }
 
-  if (type === 4 && !group.hidden) {
+  if (type === 4) {
+    const proxyColItemsMemo = useMemo(() => {
+      return proxyCol?.map((proxy) => (
+        <ProxyItemMini
+          key={item.key + proxy.name}
+          group={group}
+          proxy={proxy!}
+          selected={group.now === proxy.name}
+          showType={headState?.showType}
+          onClick={() => onChangeProxy(group, proxy!)}
+        />
+      ));
+    }, [proxyCol, group, headState]);
     return (
       <Box
         sx={{
@@ -183,16 +198,7 @@ export const ProxyRender = (props: RenderProps) => {
           gridTemplateColumns: `repeat(${item.col! || 2}, 1fr)`,
         }}
       >
-        {proxyCol?.map((proxy) => (
-          <ProxyItemMini
-            key={item.key + proxy.name}
-            group={group}
-            proxy={proxy!}
-            selected={group.now === proxy.name}
-            showType={headState?.showType}
-            onClick={() => onChangeProxy(group, proxy!)}
-          />
-        ))}
+        {proxyColItemsMemo}
       </Box>
     );
   }
@@ -201,7 +207,7 @@ export const ProxyRender = (props: RenderProps) => {
 };
 
 const StyledPrimary = styled("span")`
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 700;
   line-height: 1.5;
   overflow: hidden;
@@ -216,11 +222,7 @@ const StyledSubtitle = styled("span")`
   white-space: nowrap;
 `;
 
-const ListItemTextChild = styled("span")`
-  display: block;
-`;
-
-const StyledTypeBox = styled(ListItemTextChild)(({ theme }) => ({
+const StyledTypeBox = styled(Box)(({ theme }) => ({
   display: "inline-block",
   border: "1px solid #ccc",
   borderColor: alpha(theme.palette.primary.main, 0.5),

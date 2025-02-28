@@ -32,7 +32,7 @@ export const ProviderButton = () => {
 
   const hasProvider = Object.keys(data || {}).length > 0;
   const [updating, setUpdating] = useState(
-    Object.keys(data || {}).map(() => false)
+    Object.keys(data || {}).map(() => false),
   );
 
   const setUpdatingAt = (status: boolean, index: number) => {
@@ -67,7 +67,7 @@ export const ProviderButton = () => {
         sx={{ textTransform: "capitalize" }}
         onClick={() => setOpen(true)}
       >
-        {t("Provider")}
+        {t("Rule Provider")}
       </Button>
 
       <BaseDialog
@@ -79,11 +79,9 @@ export const ProviderButton = () => {
               variant="contained"
               size="small"
               onClick={async () => {
-                Object.entries(data || {}).forEach(
-                  async ([key, item], index) => {
-                    await handleUpdate(key, index);
-                  }
-                );
+                Object.entries(data || {}).forEach(async ([key], index) => {
+                  await handleUpdate(key, index);
+                });
               }}
             >
               {t("Update All")}
@@ -92,7 +90,7 @@ export const ProviderButton = () => {
         }
         contentSx={{ width: 400 }}
         disableOk
-        cancelBtn={t("Cancel")}
+        cancelBtn={t("Close")}
         onClose={() => setOpen(false)}
         onCancel={() => setOpen(false)}
       >
@@ -145,7 +143,7 @@ export const ProviderButton = () => {
                   <IconButton
                     size="small"
                     color="inherit"
-                    title="Update Provider"
+                    title={`${t("Update")}${t("Rule Provider")}`}
                     onClick={() => handleUpdate(key, index)}
                     sx={{
                       animation: updating[index]
@@ -164,7 +162,9 @@ export const ProviderButton = () => {
     </>
   );
 };
-const TypeBox = styled(Box)(({ theme }) => ({
+const TypeBox = styled(Box, {
+  shouldForwardProp: (prop) => prop !== "component",
+})<{ component?: React.ElementType }>(({ theme }) => ({
   display: "inline-block",
   border: "1px solid #ccc",
   borderColor: alpha(theme.palette.secondary.main, 0.5),
@@ -176,7 +176,9 @@ const TypeBox = styled(Box)(({ theme }) => ({
   lineHeight: 1.25,
 }));
 
-const StyledTypeBox = styled(Box)(({ theme }) => ({
+const StyledTypeBox = styled(Box, {
+  shouldForwardProp: (prop) => prop !== "component",
+})<{ component?: React.ElementType }>(({ theme }) => ({
   display: "inline-block",
   border: "1px solid #ccc",
   borderColor: alpha(theme.palette.primary.main, 0.5),

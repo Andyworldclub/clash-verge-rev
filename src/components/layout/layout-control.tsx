@@ -1,5 +1,5 @@
 import { Button, ButtonGroup } from "@mui/material";
-import { appWindow } from "@tauri-apps/api/window";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
   CloseRounded,
   CropSquareRounded,
@@ -8,23 +8,36 @@ import {
   PushPinOutlined,
   PushPinRounded,
 } from "@mui/icons-material";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+const appWindow = getCurrentWebviewWindow();
 
 export const LayoutControl = () => {
   const minWidth = 40;
 
   const [isMaximized, setIsMaximized] = useState(false);
   const [isPined, setIsPined] = useState(false);
-  appWindow.onResized(() => {
-    appWindow.isMaximized().then((isMaximized) => {
-      setIsMaximized(() => isMaximized);
+
+  useEffect(() => {
+    const unlistenResized = appWindow.onResized(() => {
+      appWindow.isMaximized().then((maximized) => {
+        setIsMaximized(() => maximized);
+      });
     });
-  });
+
+    appWindow.isMaximized().then((maximized) => {
+      setIsMaximized(() => maximized);
+    });
+
+    return () => {
+      unlistenResized.then((fn) => fn());
+    };
+  }, []);
 
   return (
     <ButtonGroup
       variant="text"
       sx={{
+        zIndex: 1000,
         height: "100%",
         ".MuiButtonGroup-grouped": {
           borderRadius: "0px",

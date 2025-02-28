@@ -13,7 +13,7 @@ pub struct IClashTemp(pub Mapping);
 impl IClashTemp {
     pub fn new() -> Self {
         let template = Self::template();
-        match dirs::clash_path().and_then(|path| help::read_merge_mapping(&path)) {
+        match dirs::clash_path().and_then(|path| help::read_mapping(&path)) {
             Ok(mut map) => {
                 template.0.keys().for_each(|key| {
                     if !map.contains_key(key) {
@@ -32,13 +32,12 @@ impl IClashTemp {
     pub fn template() -> Self {
         let mut map = Mapping::new();
         let mut tun = Mapping::new();
-        tun.insert("stack".into(), "gvisor".into());
-        tun.insert("device".into(), "Meta".into());
+        tun.insert("enable".into(), false.into());
+        tun.insert("stack".into(), "mixed".into());
         tun.insert("auto-route".into(), true.into());
         tun.insert("strict-route".into(), false.into());
         tun.insert("auto-detect-interface".into(), true.into());
         tun.insert("dns-hijack".into(), vec!["any:53"].into());
-        tun.insert("mtu".into(), 9000.into());
         #[cfg(not(target_os = "windows"))]
         map.insert("redir-port".into(), 7895.into());
         #[cfg(target_os = "linux")]
@@ -50,9 +49,13 @@ impl IClashTemp {
         map.insert("allow-lan".into(), false.into());
         map.insert("mode".into(), "rule".into());
         map.insert("external-controller".into(), "127.0.0.1:9097".into());
+        let mut cors_map = Mapping::new();
+        cors_map.insert("allow-private-network".into(), true.into());
+        cors_map.insert("allow-origins".into(), vec!["*"].into());
         map.insert("secret".into(), "".into());
         map.insert("tun".into(), tun.into());
-
+        map.insert("external-controller-cors".into(), cors_map.into());
+        map.insert("unified-delay".into(), true.into());
         Self(map)
     }
 
@@ -153,17 +156,20 @@ impl IClashTemp {
     }
 
     pub fn guard_mixed_port(config: &Mapping) -> u16 {
-        let mut port = config
-            .get("mixed-port")
+        let raw_value = config.get("mixed-port");
+
+        let mut port = raw_value
             .and_then(|value| match value {
                 Value::String(val_str) => val_str.parse().ok(),
                 Value::Number(val_num) => val_num.as_u64().map(|u| u as u16),
                 _ => None,
             })
             .unwrap_or(7897);
+
         if port == 0 {
             port = 7897;
         }
+
         port
     }
 

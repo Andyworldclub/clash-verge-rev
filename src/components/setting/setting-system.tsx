@@ -1,17 +1,19 @@
-import useSWR from "swr";
+import useSWR, { mutate } from "swr";
 import { useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { IconButton, Tooltip } from "@mui/material";
-import { PrivacyTipRounded, Settings, InfoRounded } from "@mui/icons-material";
-import { checkService } from "@/services/cmds";
+import {
+  SettingsRounded,
+  PlayArrowRounded,
+  PauseRounded,
+} from "@mui/icons-material";
 import { useVerge } from "@/hooks/use-verge";
-import { DialogRef, Switch } from "@/components/base";
+import { DialogRef, Notice, Switch } from "@/components/base";
 import { SettingList, SettingItem } from "./mods/setting-comp";
 import { GuardState } from "./mods/guard-state";
-import { ServiceViewer } from "./mods/service-viewer";
 import { SysproxyViewer } from "./mods/sysproxy-viewer";
 import { TunViewer } from "./mods/tun-viewer";
-import getSystem from "@/utils/get-system";
+import { TooltipIcon } from "@/components/base/base-tooltip-icon";
+import { getSystemProxy, getAutotemProxy } from "@/services/cmds";
 
 interface Props {
   onError?: (err: Error) => void;
@@ -22,59 +24,49 @@ const SettingSystem = ({ onError }: Props) => {
 
   const { verge, mutateVerge, patchVerge } = useVerge();
 
-  // service mode
-  const { data: serviceStatus } = useSWR("checkService", checkService, {
-    revalidateIfStale: false,
-    shouldRetryOnError: false,
-    focusThrottleInterval: 36e5, // 1 hour
-  });
+  const { data: sysproxy } = useSWR("getSystemProxy", getSystemProxy);
+  const { data: autoproxy } = useSWR("getAutotemProxy", getAutotemProxy);
 
-  const serviceRef = useRef<DialogRef>(null);
   const sysproxyRef = useRef<DialogRef>(null);
   const tunRef = useRef<DialogRef>(null);
 
   const {
     enable_tun_mode,
     enable_auto_launch,
-    enable_service_mode,
     enable_silent_start,
     enable_system_proxy,
+    proxy_auto_config,
   } = verge ?? {};
+
+  const isProxyEnabled = proxy_auto_config
+    ? autoproxy?.enable
+    : sysproxy?.enable;
 
   const onSwitchFormat = (_e: any, value: boolean) => value;
   const onChangeData = (patch: Partial<IVergeConfig>) => {
     mutateVerge({ ...verge, ...patch }, false);
   };
 
+  const updateProxyStatus = async () => {
+    // 等待一小段时间让系统代理状态变化
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await mutate("getSystemProxy");
+    await mutate("getAutotemProxy");
+  };
+
   return (
     <SettingList title={t("System Setting")}>
       <SysproxyViewer ref={sysproxyRef} />
       <TunViewer ref={tunRef} />
-      <ServiceViewer ref={serviceRef} enable={!!enable_service_mode} />
 
       <SettingItem
         label={t("Tun Mode")}
         extra={
-          <>
-            <Tooltip title={t("Tun Mode Info")} placement="top">
-              <IconButton color="inherit" size="small">
-                <InfoRounded
-                  fontSize="inherit"
-                  style={{ cursor: "pointer", opacity: 0.75 }}
-                />
-              </IconButton>
-            </Tooltip>
-            <IconButton
-              color="inherit"
-              size="small"
-              onClick={() => tunRef.current?.open()}
-            >
-              <Settings
-                fontSize="inherit"
-                style={{ cursor: "pointer", opacity: 0.75 }}
-              />
-            </IconButton>
-          </>
+          <TooltipIcon
+            title={t("Tun Mode Info")}
+            icon={SettingsRounded}
+            onClick={() => tunRef.current?.open()}
+          />
         }
       >
         <GuardState
@@ -82,58 +74,31 @@ const SettingSystem = ({ onError }: Props) => {
           valueProps="checked"
           onCatch={onError}
           onFormat={onSwitchFormat}
-          onChange={(e) => onChangeData({ enable_tun_mode: e })}
-          onGuard={(e) => patchVerge({ enable_tun_mode: e })}
+          onChange={(e) => {
+            onChangeData({ enable_tun_mode: e });
+          }}
+          onGuard={(e) => {
+            return patchVerge({ enable_tun_mode: e });
+          }}
         >
           <Switch edge="end" />
         </GuardState>
       </SettingItem>
-
-      <SettingItem
-        label={t("Service Mode")}
-        extra={
-          <IconButton
-            color="inherit"
-            size="small"
-            onClick={() => serviceRef.current?.open()}
-          >
-            <PrivacyTipRounded
-              fontSize="inherit"
-              style={{ cursor: "pointer", opacity: 0.75 }}
-            />
-          </IconButton>
-        }
-      >
-        <GuardState
-          value={enable_service_mode ?? false}
-          valueProps="checked"
-          onCatch={onError}
-          onFormat={onSwitchFormat}
-          onChange={(e) => onChangeData({ enable_service_mode: e })}
-          onGuard={(e) => patchVerge({ enable_service_mode: e })}
-        >
-          <Switch
-            edge="end"
-            disabled={
-              serviceStatus !== "active" && serviceStatus !== "installed"
-            }
-          />
-        </GuardState>
-      </SettingItem>
-
       <SettingItem
         label={t("System Proxy")}
         extra={
-          <IconButton
-            color="inherit"
-            size="small"
-            onClick={() => sysproxyRef.current?.open()}
-          >
-            <Settings
-              fontSize="inherit"
-              style={{ cursor: "pointer", opacity: 0.75 }}
+          <>
+            <TooltipIcon
+              title={t("System Proxy Info")}
+              icon={SettingsRounded}
+              onClick={() => sysproxyRef.current?.open()}
             />
-          </IconButton>
+            {isProxyEnabled ? (
+              <PlayArrowRounded sx={{ color: "success.main", mr: 1 }} />
+            ) : (
+              <PauseRounded sx={{ color: "error.main", mr: 1 }} />
+            )}
+          </>
         }
       >
         <GuardState
@@ -142,7 +107,10 @@ const SettingSystem = ({ onError }: Props) => {
           onCatch={onError}
           onFormat={onSwitchFormat}
           onChange={(e) => onChangeData({ enable_system_proxy: e })}
-          onGuard={(e) => patchVerge({ enable_system_proxy: e })}
+          onGuard={async (e) => {
+            await patchVerge({ enable_system_proxy: e });
+            await updateProxyStatus();
+          }}
         >
           <Switch edge="end" />
         </GuardState>
@@ -161,7 +129,12 @@ const SettingSystem = ({ onError }: Props) => {
         </GuardState>
       </SettingItem>
 
-      <SettingItem label={t("Silent Start")}>
+      <SettingItem
+        label={t("Silent Start")}
+        extra={
+          <TooltipIcon title={t("Silent Start Info")} sx={{ opacity: "0.7" }} />
+        }
+      >
         <GuardState
           value={enable_silent_start ?? false}
           valueProps="checked"

@@ -111,7 +111,7 @@
       position: absolute;
       top: 0;
       left: 0;
-      right: 2px;
+      right: 1px;
       bottom: 0px;
     }
   }
@@ -146,8 +146,14 @@
     .layout__left {
       padding-top: 24px;
     }
+
     .layout__right .the-content {
       top: 24px;
+    }
+
+    .layout__left .the-newbtn {
+      right: 9px;
+      top: 2px;
     }
   }
 }

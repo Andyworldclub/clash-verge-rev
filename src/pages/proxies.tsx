@@ -1,14 +1,10 @@
 import useSWR from "swr";
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import { useLockFn } from "ahooks";
 import { useTranslation } from "react-i18next";
-import { Box, Button, ButtonGroup, Paper } from "@mui/material";
-import {
-  closeAllConnections,
-  getClashConfig,
-  updateConfigs,
-} from "@/services/api";
-import { patchClashConfig } from "@/services/cmds";
+import { Box, Button, ButtonGroup } from "@mui/material";
+import { closeAllConnections, getClashConfig } from "@/services/api";
+import { patchClashConfig, patchClashMode } from "@/services/cmds";
 import { useVerge } from "@/hooks/use-verge";
 import { BasePage } from "@/components/base";
 import { ProxyGroups } from "@/components/proxy/proxy-groups";
@@ -19,17 +15,12 @@ const ProxyPage = () => {
 
   const { data: clashConfig, mutate: mutateClash } = useSWR(
     "getClashConfig",
-    getClashConfig
+    getClashConfig,
   );
 
   const { verge } = useVerge();
 
-  const modeList = useMemo(() => {
-    if (verge?.clash_core?.includes("clash-meta")) {
-      return ["rule", "global", "direct"];
-    }
-    return ["rule", "global", "direct", "script"];
-  }, [verge?.clash_core]);
+  const modeList = ["rule", "global", "direct"];
 
   const curMode = clashConfig?.mode?.toLowerCase();
 
@@ -38,8 +29,7 @@ const ProxyPage = () => {
     if (mode !== curMode && verge?.auto_close_connection) {
       closeAllConnections();
     }
-    await updateConfigs({ mode });
-    await patchClashConfig({ mode });
+    await patchClashMode(mode);
     mutateClash();
   });
 
@@ -52,7 +42,7 @@ const ProxyPage = () => {
   return (
     <BasePage
       full
-      contentStyle={{ height: "100%" }}
+      contentStyle={{ height: "101.5%" }}
       title={t("Proxy Groups")}
       header={
         <Box display="flex" alignItems="center" gap={1}>

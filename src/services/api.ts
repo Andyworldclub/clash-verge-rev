@@ -49,12 +49,6 @@ export const getClashConfig = async () => {
   return instance.get("/configs") as Promise<IConfigData>;
 };
 
-/// Update current configs
-export const updateConfigs = async (config: Partial<IConfigData>) => {
-  const instance = await getAxios();
-  return instance.patch("/configs", config);
-};
-
 /// Update geo data
 export const updateGeoData = async () => {
   const instance = await getAxios();
@@ -78,16 +72,16 @@ export const getRules = async () => {
 export const getProxyDelay = async (
   name: string,
   url?: string,
-  timeout?: number
+  timeout?: number,
 ) => {
   const params = {
     timeout: timeout || 10000,
-    url: url || "http://1.1.1.1",
+    url: url || "http://cp.cloudflare.com/generate_204",
   };
   const instance = await getAxios();
   const result = await instance.get(
     `/proxies/${encodeURIComponent(name)}/delay`,
-    { params }
+    { params },
   );
   return result as any as { delay: number };
 };
@@ -114,8 +108,8 @@ export const getProxies = async () => {
   // provider name map
   const providerMap = Object.fromEntries(
     Object.entries(providerRecord).flatMap(([provider, item]) =>
-      item.proxies.map((p) => [p.name, { ...p, provider }])
-    )
+      item.proxies.map((p) => [p.name, { ...p, provider }]),
+    ),
   );
 
   // compatible with proxy-providers
@@ -128,39 +122,53 @@ export const getProxies = async () => {
       udp: false,
       xudp: false,
       tfo: false,
+      mptcp: false,
+      smux: false,
       history: [],
     };
   };
 
   const { GLOBAL: global, DIRECT: direct, REJECT: reject } = proxyRecord;
 
-  let groups = Object.values(proxyRecord)
-    .filter((each) => each.name !== "GLOBAL" && each.all)
-    .map((each) => ({
-      ...each,
-      all: each.all!.map((item) => generateItem(item)),
-    }));
-
-  if (global?.all) {
-    let globalGroups = global.all
-      .filter((name) => proxyRecord[name]?.all)
-      .map((name) => proxyRecord[name])
-      .map((each) => ({
+  let groups: IProxyGroupItem[] = Object.values(proxyRecord).reduce<
+    IProxyGroupItem[]
+  >((acc, each) => {
+    if (each.name !== "GLOBAL" && each.all) {
+      acc.push({
         ...each,
         all: each.all!.map((item) => generateItem(item)),
-      }));
-    let globalNames = globalGroups.map((each) => each.name);
+      });
+    }
+
+    return acc;
+  }, []);
+
+  if (global?.all) {
+    let globalGroups: IProxyGroupItem[] = global.all.reduce<IProxyGroupItem[]>(
+      (acc, name) => {
+        if (proxyRecord[name]?.all) {
+          acc.push({
+            ...proxyRecord[name],
+            all: proxyRecord[name].all!.map((item) => generateItem(item)),
+          });
+        }
+        return acc;
+      },
+      [],
+    );
+
+    let globalNames = new Set(globalGroups.map((each) => each.name));
     groups = groups
       .filter((group) => {
-        return !globalNames.includes(group.name);
+        return !globalNames.has(group.name);
       })
       .concat(globalGroups);
   }
 
   const proxies = [direct, reject].concat(
     Object.values(proxyRecord).filter(
-      (p) => !p.all?.length && p.name !== "DIRECT" && p.name !== "REJECT"
-    )
+      (p) => !p.all?.length && p.name !== "DIRECT" && p.name !== "REJECT",
+    ),
   );
 
   const _global: IProxyGroupItem = {
@@ -185,7 +193,7 @@ export const getProxyProviders = async () => {
     Object.entries(providers).filter(([key, item]) => {
       const type = item.vehicleType.toLowerCase();
       return type === "http" || type === "file";
-    })
+    }),
   );
 };
 
@@ -202,7 +210,7 @@ export const getRuleProviders = async () => {
     Object.entries(providers).filter(([key, item]) => {
       const type = item.vehicleType.toLowerCase();
       return type === "http" || type === "file";
-    })
+    }),
   );
 };
 
@@ -210,7 +218,7 @@ export const getRuleProviders = async () => {
 export const providerHealthCheck = async (name: string) => {
   const instance = await getAxios();
   return instance.get(
-    `/providers/proxies/${encodeURIComponent(name)}/healthcheck`
+    `/providers/proxies/${encodeURIComponent(name)}/healthcheck`,
   );
 };
 
@@ -246,16 +254,37 @@ export const closeAllConnections = async () => {
 export const getGroupProxyDelays = async (
   groupName: string,
   url?: string,
-  timeout?: number
+  timeout?: number,
 ) => {
   const params = {
     timeout: timeout || 10000,
-    url: url || "http://1.1.1.1",
+    url: url || "http://cp.cloudflare.com/generate_204",
   };
   const instance = await getAxios();
   const result = await instance.get(
     `/group/${encodeURIComponent(groupName)}/delay`,
-    { params }
+    { params },
   );
   return result as any as Record<string, number>;
+};
+
+// Is debug enabled
+export const isDebugEnabled = async () => {
+  try {
+    const instance = await getAxios();
+    await instance.get("/debug/pprof");
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+// GC
+export const gc = async () => {
+  try {
+    const instance = await getAxios();
+    await instance.put("/debug/gc");
+  } catch (error) {
+    console.error(`Error gcing: ${error}`);
+  }
 };

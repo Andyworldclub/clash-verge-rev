@@ -1,15 +1,11 @@
 import { useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { useLockFn } from "ahooks";
+import { TextField, Select, MenuItem, Typography } from "@mui/material";
 import {
-  TextField,
-  Select,
-  MenuItem,
-  Typography,
-  IconButton,
-  Tooltip,
-} from "@mui/material";
-import { ArrowForward, Settings, Shuffle } from "@mui/icons-material";
+  SettingsRounded,
+  ShuffleRounded,
+  LanRounded,
+} from "@mui/icons-material";
 import { DialogRef, Notice, Switch } from "@/components/base";
 import { useClash } from "@/hooks/use-clash";
 import { GuardState } from "./mods/guard-state";
@@ -22,6 +18,8 @@ import { invoke_uwp_tool } from "@/services/cmds";
 import getSystem from "@/utils/get-system";
 import { useVerge } from "@/hooks/use-verge";
 import { updateGeoData } from "@/services/api";
+import { TooltipIcon } from "@/components/base/base-tooltip-icon";
+import { NetworkInterfaceViewer } from "./mods/network-interface-viewer";
 
 const isWIN = getSystem() === "windows";
 
@@ -35,7 +33,12 @@ const SettingClash = ({ onError }: Props) => {
   const { clash, version, mutateClash, patchClash } = useClash();
   const { verge, mutateVerge, patchVerge } = useVerge();
 
-  const { ipv6, "allow-lan": allowLan, "log-level": logLevel } = clash ?? {};
+  const {
+    ipv6,
+    "allow-lan": allowLan,
+    "log-level": logLevel,
+    "unified-delay": unifiedDelay,
+  } = clash ?? {};
 
   const { enable_random_port = false, verge_mixed_port } = verge ?? {};
 
@@ -43,6 +46,7 @@ const SettingClash = ({ onError }: Props) => {
   const portRef = useRef<DialogRef>(null);
   const ctrlRef = useRef<DialogRef>(null);
   const coreRef = useRef<DialogRef>(null);
+  const networkRef = useRef<DialogRef>(null);
 
   const onSwitchFormat = (_e: any, value: boolean) => value;
   const onChangeData = (patch: Partial<IConfigData>) => {
@@ -51,14 +55,14 @@ const SettingClash = ({ onError }: Props) => {
   const onChangeVerge = (patch: Partial<IVergeConfig>) => {
     mutateVerge({ ...verge, ...patch }, false);
   };
-  const onUpdateGeo = useLockFn(async () => {
+  const onUpdateGeo = async () => {
     try {
       await updateGeoData();
-      Notice.success("Start update geodata");
+      Notice.success(t("GeoData Updated"));
     } catch (err: any) {
       Notice.error(err?.response.data.message || err.toString());
     }
-  });
+  };
 
   return (
     <SettingList title={t("Clash Setting")}>
@@ -66,8 +70,21 @@ const SettingClash = ({ onError }: Props) => {
       <ClashPortViewer ref={portRef} />
       <ControllerViewer ref={ctrlRef} />
       <ClashCoreViewer ref={coreRef} />
+      <NetworkInterfaceViewer ref={networkRef} />
 
-      <SettingItem label={t("Allow Lan")}>
+      <SettingItem
+        label={t("Allow Lan")}
+        extra={
+          <TooltipIcon
+            title={t("Network Interface")}
+            color={"inherit"}
+            icon={LanRounded}
+            onClick={() => {
+              networkRef.current?.open();
+            }}
+          />
+        }
+      >
         <GuardState
           value={allowLan ?? false}
           valueProps="checked"
@@ -93,10 +110,36 @@ const SettingClash = ({ onError }: Props) => {
         </GuardState>
       </SettingItem>
 
-      <SettingItem label={t("Log Level")}>
+      <SettingItem
+        label={t("Unified Delay")}
+        extra={
+          <TooltipIcon
+            title={t("Unified Delay Info")}
+            sx={{ opacity: "0.7" }}
+          />
+        }
+      >
+        <GuardState
+          value={unifiedDelay ?? false}
+          valueProps="checked"
+          onCatch={onError}
+          onFormat={onSwitchFormat}
+          onChange={(e) => onChangeData({ "unified-delay": e })}
+          onGuard={(e) => patchClash({ "unified-delay": e })}
+        >
+          <Switch edge="end" />
+        </GuardState>
+      </SettingItem>
+
+      <SettingItem
+        label={t("Log Level")}
+        extra={
+          <TooltipIcon title={t("Log Level Info")} sx={{ opacity: "0.7" }} />
+        }
+      >
         <GuardState
           // clash premium 2022.08.26 值为warn
-          value={logLevel === "warn" ? "warning" : logLevel ?? "info"}
+          value={logLevel === "warn" ? "warning" : (logLevel ?? "info")}
           onCatch={onError}
           onFormat={(e: any) => e.target.value}
           onChange={(e) => onChangeData({ "log-level": e })}
@@ -115,27 +158,24 @@ const SettingClash = ({ onError }: Props) => {
       <SettingItem
         label={t("Port Config")}
         extra={
-          <Tooltip title={t("Random Port")}>
-            <IconButton
-              color={enable_random_port ? "primary" : "inherit"}
-              size="small"
-              onClick={() => {
-                Notice.success(t("After restart to take effect"), 1000);
-                onChangeVerge({ enable_random_port: !enable_random_port });
-                patchVerge({ enable_random_port: !enable_random_port });
-              }}
-            >
-              <Shuffle
-                fontSize="inherit"
-                style={{ cursor: "pointer", opacity: 0.75 }}
-              />
-            </IconButton>
-          </Tooltip>
+          <TooltipIcon
+            title={t("Random Port")}
+            color={enable_random_port ? "primary" : "inherit"}
+            icon={ShuffleRounded}
+            onClick={() => {
+              Notice.success(
+                t("Restart Application to Apply Modifications"),
+                1000,
+              );
+              onChangeVerge({ enable_random_port: !enable_random_port });
+              patchVerge({ enable_random_port: !enable_random_port });
+            }}
+          />
         }
       >
         <TextField
+          autoComplete="new-password"
           disabled={enable_random_port}
-          autoComplete="off"
           size="small"
           value={verge_mixed_port ?? 7897}
           sx={{ width: 100, input: { py: "7.5px", cursor: "pointer" } }}
@@ -146,69 +186,39 @@ const SettingClash = ({ onError }: Props) => {
         />
       </SettingItem>
 
-      <SettingItem label={t("External")}>
-        <IconButton
-          color="inherit"
-          size="small"
-          sx={{ my: "2px" }}
-          onClick={() => ctrlRef.current?.open()}
-        >
-          <ArrowForward />
-        </IconButton>
-      </SettingItem>
+      <SettingItem
+        onClick={() => ctrlRef.current?.open()}
+        label={t("External")}
+      />
 
-      <SettingItem label={t("Web UI")}>
-        <IconButton
-          color="inherit"
-          size="small"
-          sx={{ my: "2px" }}
-          onClick={() => webRef.current?.open()}
-        >
-          <ArrowForward />
-        </IconButton>
-      </SettingItem>
+      <SettingItem onClick={() => webRef.current?.open()} label={t("Web UI")} />
 
       <SettingItem
         label={t("Clash Core")}
         extra={
-          <IconButton
-            color="inherit"
-            size="small"
+          <TooltipIcon
+            icon={SettingsRounded}
             onClick={() => coreRef.current?.open()}
-          >
-            <Settings
-              fontSize="inherit"
-              style={{ cursor: "pointer", opacity: 0.75 }}
-            />
-          </IconButton>
+          />
         }
       >
         <Typography sx={{ py: "7px", pr: 1 }}>{version}</Typography>
       </SettingItem>
 
       {isWIN && (
-        <SettingItem label={t("Open UWP tool")}>
-          <IconButton
-            color="inherit"
-            size="small"
-            sx={{ my: "2px" }}
-            onClick={invoke_uwp_tool}
-          >
-            <ArrowForward />
-          </IconButton>
-        </SettingItem>
+        <SettingItem
+          onClick={invoke_uwp_tool}
+          label={t("Open UWP tool")}
+          extra={
+            <TooltipIcon
+              title={t("Open UWP tool Info")}
+              sx={{ opacity: "0.7" }}
+            />
+          }
+        />
       )}
 
-      <SettingItem label={t("Update GeoData")}>
-        <IconButton
-          color="inherit"
-          size="small"
-          sx={{ my: "2px" }}
-          onClick={onUpdateGeo}
-        >
-          <ArrowForward />
-        </IconButton>
-      </SettingItem>
+      <SettingItem onClick={onUpdateGeo} label={t("Update GeoData")} />
     </SettingList>
   );
 };

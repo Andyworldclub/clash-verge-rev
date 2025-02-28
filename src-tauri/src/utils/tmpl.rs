@@ -1,44 +1,63 @@
 //! Some config file template
 
 /// template for new a profile item
-pub const ITEM_LOCAL: &str = "# Profile Template for clash verge
+pub const ITEM_LOCAL: &str = "# Profile Template for Clash Verge
 
-proxies:
+proxies: []
 
-proxy-groups:
+proxy-groups: []
 
-rules:
+rules: []
 ";
 
 /// enhanced profile
-pub const ITEM_MERGE: &str = "# Merge Template for clash verge
-# The `Merge` format used to enhance profile
+pub const ITEM_MERGE: &str = "# Profile Enhancement Merge Template for Clash Verge
 
-prepend-rules:
+profile:
+  store-selected: true
 
-prepend-rule-providers:
+dns:
+  use-system-hosts: false
+";
 
-prepend-proxies:
+pub const ITEM_MERGE_EMPTY: &str = "# Profile Enhancement Merge Template for Clash Verge
 
-prepend-proxy-providers:
-
-prepend-proxy-groups:
-
-append-rules:
-
-append-rule-providers:
-
-append-proxies:
-
-append-proxy-providers:
-
-append-proxy-groups:
 ";
 
 /// enhanced profile
-pub const ITEM_SCRIPT: &str = "// Define the `main` function
+pub const ITEM_SCRIPT: &str = "// Define main function (script entry)
 
-function main(params) {
-  return params;
+function main(config, profileName) {
+  return config;
 }
+";
+
+/// enhanced profile
+pub const ITEM_RULES: &str = "# Profile Enhancement Rules Template for Clash Verge
+
+prepend: []
+
+append: []
+
+delete: []
+";
+
+/// enhanced profile
+pub const ITEM_PROXIES: &str = "# Profile Enhancement Proxies Template for Clash Verge
+
+prepend: []
+
+append: []
+
+delete: []
+";
+
+/// enhanced profile
+pub const ITEM_GROUPS: &str = "# Profile Enhancement Groups Template for Clash Verge
+
+prepend: []
+
+append: []
+
+delete: []
 ";
